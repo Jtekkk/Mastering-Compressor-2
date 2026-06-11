@@ -1,0 +1,16 @@
+# build artefacts
+build/
+cmake-build-*/
+*.o
+*.so
+*.vst3
+*.component
+
+# IDE
+.vscode/
+.idea/
+compile_commands.json
+.cache/
+
+# OS
+.DS_Store
