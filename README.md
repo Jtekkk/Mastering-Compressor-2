@@ -65,6 +65,45 @@ cmake --build build --target MC2_VST3 -j$(nproc)
 The VST3 lands in `build/MC2_artefacts/Release/VST3/`. Other targets:
 `MC2_Standalone`, and `MC2_AU` on macOS.
 
+### Cross-compiling for Windows (from Linux)
+
+Uses [llvm-mingw](https://github.com/mstorsjo/llvm-mingw) (clang + lld +
+current mingw-w64, UCRT). Plain GCC/MinGW cannot build JUCE 8: its Direct2D
+code uses `_Pragma` inside default member initializers (GCC rejects this),
+and distro mingw-w64 headers predate Direct2D 1.3.
+
+```bash
+# one-time toolchain setup: unpack an llvm-mingw ucrt release into /opt/llvm-mingw
+curl -fsSL -o /tmp/llvm-mingw.tar.xz \
+  https://github.com/mstorsjo/llvm-mingw/releases/download/20260602/llvm-mingw-20260602-ucrt-ubuntu-22.04-x86_64.tar.xz
+sudo tar xf /tmp/llvm-mingw.tar.xz -C /opt && sudo mv /opt/llvm-mingw-2*  /opt/llvm-mingw
+
+cmake -B build-win -DCMAKE_BUILD_TYPE=Release \
+      -DCMAKE_TOOLCHAIN_FILE=cmake/toolchain-llvm-mingw-w64.cmake
+cmake --build build-win --target MC2_VST3 MC2_Standalone -j$(nproc)
+```
+
+The VST3 bundle lands in `build-win/MC2_artefacts/Release/VST3/` — copy the
+whole `MC-2 Mastering Compressor.vst3` folder to
+`C:\Program Files\Common Files\VST3\`. Binaries are self-contained (static
+libc++/winpthread; imports only Windows system DLLs and the UCRT).
+
+Supporting pieces, applied automatically:
+
+* `cmake/patch-juce.cmake` — fixes two MSVC-isms in JUCE 8.0.4 that clang
+  rejects (a dead `AudioPluginInstance` constructor; `__uuidof` on
+  `ComSmartPtr` expressions). Applied via FetchContent `PATCH_COMMAND`,
+  also valid for MSVC builds.
+* `cmake/mingw-compat.h` — force-included SDK shim (`<cstring>`, the missing
+  `CaretPosition` UIA enum) plus a `Dbghelp.h` case-alias in
+  `cmake/win-include-aliases/`.
+* The optional VST3 `moduleinfo.json` manifest step is skipped because the
+  helper tool is a Windows executable; hosts do not require it.
+
+The cross-built engine passes the same DSP suite under Wine
+(`wine build-win/dsp_smoke.exe`), and the module's `GetPluginFactory`/class
+enumeration has been exercised under Wine as well.
+
 ### DSP verification
 
 A headless test harness measures the engine against the spec sheet — ratios,

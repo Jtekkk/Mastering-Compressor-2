@@ -12,6 +12,7 @@ FetchContent_Declare(
     JUCE
     URL https://github.com/juce-framework/JUCE/archive/refs/tags/8.0.4.tar.gz
     DOWNLOAD_EXTRACT_TIMESTAMP TRUE
+    PATCH_COMMAND ${CMAKE_COMMAND} -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/patch-juce.cmake
 )
 FetchContent_MakeAvailable(JUCE)
 
@@ -46,17 +47,35 @@ target_compile_definitions(MC2 PUBLIC
     JUCE_USE_CURL=0
     JUCE_VST3_CAN_REPLACE_VST2=0
     JUCE_DISPLAY_SPLASH_SCREEN=0
+    # No media-file codecs needed; also unbuildable with mingw-w64 headers.
+    JUCE_USE_WINDOWS_MEDIA_FORMAT=0
 )
+
+# LTO stays off for cross builds: MinGW links are slow and fragile with it.
+set(MC2_FLAG_TARGETS
+    juce::juce_recommended_config_flags
+    juce::juce_recommended_warning_flags)
+if(NOT CMAKE_CROSSCOMPILING)
+    list(APPEND MC2_FLAG_TARGETS juce::juce_recommended_lto_flags)
+endif()
 
 target_link_libraries(MC2
     PRIVATE
         juce::juce_audio_utils
         juce::juce_dsp
     PUBLIC
-        juce::juce_recommended_config_flags
-        juce::juce_recommended_lto_flags
-        juce::juce_recommended_warning_flags
+        ${MC2_FLAG_TARGETS}
 )
+
+# MSVC picks these up from JUCE's #pragma comment(lib, ...) directives;
+# MinGW ignores those, so list the Windows system libraries explicitly.
+if(WIN32 AND NOT MSVC)
+    target_link_libraries(MC2 PRIVATE
+        winmm ws2_32 version shlwapi wininet dwmapi uxtheme shcore
+        imm32 comdlg32 shell32 ole32 oleaut32 uuid rpcrt4 advapi32
+        d2d1 dwrite dxgi dcomp d3d11 windowscodecs oleacc dsound
+        dbghelp comctl32 sapi ksuser avrt)
+endif()
 
 # ---------------------------------------------------- Headless DSP tests ----
 # The DSP core (Source/DSP) is dependency-free C++17, so it can be exercised

@@ -1,5 +1,6 @@
 # build artefacts
 build/
+build-win/
 cmake-build-*/
 *.o
 *.so
