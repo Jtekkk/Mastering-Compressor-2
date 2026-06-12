@@ -14,6 +14,13 @@ FetchContent_Declare(
     DOWNLOAD_EXTRACT_TIMESTAMP TRUE
     PATCH_COMMAND ${CMAKE_COMMAND} -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/patch-juce.cmake
 )
+# When cross-compiling, the juce_vst3_helper executable targets Windows and
+# cannot run on the build host - skip the optional moduleinfo.json step.
+# (Normal variable on purpose: JUCE force-overwrites the cache entry.)
+if(CMAKE_CROSSCOMPILING AND CMAKE_SYSTEM_NAME STREQUAL "Windows")
+    set(JUCE_WINDOWS_HELPERS_CAN_RUN FALSE)
+endif()
+
 FetchContent_MakeAvailable(JUCE)
 
 # ---------------------------------------------------------------- Plugin ----
@@ -75,6 +82,17 @@ if(WIN32 AND NOT MSVC)
         imm32 comdlg32 shell32 ole32 oleaut32 uuid rpcrt4 advapi32
         d2d1 dwrite dxgi dcomp d3d11 windowscodecs oleacc dsound
         dbghelp comctl32 sapi ksuser avrt)
+
+    # MSVC also embeds a ComCtl32-v6 SxS manifest via JUCE's
+    # /manifestdependency pragma; without it the loader binds legacy
+    # comctl32 5.82 and TaskDialogIndirect resolution fails at load time
+    # ("Entry Point Not Found"). Embed equivalent manifests with windres.
+    if(TARGET MC2_VST3)
+        target_sources(MC2_VST3 PRIVATE cmake/manifest-dll.rc)
+    endif()
+    if(TARGET MC2_Standalone)
+        target_sources(MC2_Standalone PRIVATE cmake/manifest-exe.rc)
+    endif()
 endif()
 
 # ---------------------------------------------------- Headless DSP tests ----

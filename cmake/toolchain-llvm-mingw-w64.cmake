@@ -44,6 +44,7 @@ set(CMAKE_EXE_LINKER_FLAGS_INIT    "-static")
 set(CMAKE_SHARED_LINKER_FLAGS_INIT "-static")
 set(CMAKE_MODULE_LINKER_FLAGS_INIT "-static")
 
-# The cross-compiled juce_vst3_helper.exe cannot run on the Linux host; skip
-# the optional moduleinfo.json manifest step (hosts load the VST3 without it).
-set(JUCE_WINDOWS_HELPERS_CAN_RUN OFF CACHE BOOL "" FORCE)
+# Note: the cross-compiled juce_vst3_helper.exe cannot run on the Linux host;
+# CMakeLists.txt disables JUCE's optional moduleinfo.json step when
+# cross-compiling (JUCE force-overwrites the cache entry, so the project sets
+# it as a normal variable instead).

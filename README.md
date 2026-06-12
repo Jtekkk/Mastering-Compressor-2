@@ -97,6 +97,11 @@ Supporting pieces, applied automatically:
 * `cmake/mingw-compat.h` — force-included SDK shim (`<cstring>`, the missing
   `CaretPosition` UIA enum) plus a `Dbghelp.h` case-alias in
   `cmake/win-include-aliases/`.
+* `cmake/mc2.manifest` (+ `manifest-exe.rc` / `manifest-dll.rc`) — embeds the
+  ComCtl32 v6 side-by-side manifest that MSVC gets from JUCE's
+  `/manifestdependency` pragma. Without it, Windows binds legacy comctl32
+  5.82 and loading fails with "Entry Point Not Found: TaskDialogIndirect"
+  (Wine does not enforce SxS versioning, so only real Windows catches this).
 * The optional VST3 `moduleinfo.json` manifest step is skipped because the
   helper tool is a Windows executable; hosts do not require it.
 
