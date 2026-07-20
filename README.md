@@ -182,6 +182,12 @@ A few conveniences the original circuit never had:
   `hostRate x factor` and the new latency reported to the host. It's a
   non-automatable, structural setting rather than a musical control - the
   same reasoning as a sample-rate change, not a parameter you'd ride.
+* **Mid/Side processing** — the `STEREO`/`M/S` toggle top bar, left of the
+  LUFS readout. Encodes L/R to Mid/Side (`mid=(L+R)/2`, `side=(L-R)/2`)
+  before the oversampled path and decodes back afterwards (an exact
+  inverse pair), so the twin-tube engine's two channels become independent
+  Mid and Side circuits instead of Left and Right - compress the centre
+  and the width separately. Stereo-only; mono input ignores it.
 
 ## Controls
 

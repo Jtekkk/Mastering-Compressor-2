@@ -26,6 +26,7 @@ namespace ParamID
     inline constexpr const char* calL      = "cal_l";
     inline constexpr const char* calR      = "cal_r";
     inline constexpr const char* oversampling = "oversampling";
+    inline constexpr const char* msMode    = "ms_mode";
 }
 
 namespace ParamText
@@ -124,6 +125,9 @@ inline juce::AudioProcessorValueTreeState::ParameterLayout createParameterLayout
     layout.add (std::make_unique<ChoiceParam> (
         ParameterID { ParamID::oversampling, 1 }, "Oversampling", ParamText::oversamplingChoices, 1,
         AudioParameterChoiceAttributes().withAutomatable (false)));
+
+    layout.add (std::make_unique<BoolParam> (
+        ParameterID { ParamID::msMode, 1 }, "Mid/Side", false));
 
     return layout;
 }

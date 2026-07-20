@@ -2,6 +2,43 @@
 #include "PluginEditor.h"
 #include "Presets.h"
 
+namespace
+{
+// Exact inverse pair (mid=(L+R)/2, side=(L-R)/2 <-> L=mid+side, R=mid-side):
+// applied around the whole oversampled path so the engine's two channels
+// carry Mid/Side instead of Left/Right when the mode is on.
+void encodeMidSide (juce::AudioBuffer<float>& buffer, int numCh, int n)
+{
+    if (numCh != 2)
+        return;
+
+    float* l = buffer.getWritePointer (0);
+    float* r = buffer.getWritePointer (1);
+    for (int i = 0; i < n; ++i)
+    {
+        const float mid  = 0.5f * (l[i] + r[i]);
+        const float side = 0.5f * (l[i] - r[i]);
+        l[i] = mid;
+        r[i] = side;
+    }
+}
+
+void decodeMidSide (juce::AudioBuffer<float>& buffer, int numCh, int n)
+{
+    if (numCh != 2)
+        return;
+
+    float* m = buffer.getWritePointer (0);
+    float* s = buffer.getWritePointer (1);
+    for (int i = 0; i < n; ++i)
+    {
+        const float mid = m[i], side = s[i];
+        m[i] = mid + side;
+        s[i] = mid - side;
+    }
+}
+} // namespace
+
 MC2AudioProcessor::MC2AudioProcessor()
     : AudioProcessor (BusesProperties()
                           .withInput ("Input", juce::AudioChannelSet::stereo(), true)
@@ -21,6 +58,7 @@ MC2AudioProcessor::MC2AudioProcessor()
     pEqLow     = apvts.getRawParameterValue (ParamID::eqLow);
     pEqAir     = apvts.getRawParameterValue (ParamID::eqAir);
     pOversampling = apvts.getRawParameterValue (ParamID::oversampling);
+    pMsMode    = apvts.getRawParameterValue (ParamID::msMode);
 
     bypassParam = dynamic_cast<juce::AudioParameterBool*> (apvts.getParameter (ParamID::bypass));
 }
@@ -195,6 +233,10 @@ void MC2AudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::Mi
 
     updateEngineParams();
 
+    const bool midSide = numCh == 2 && pMsMode != nullptr && pMsMode->load() >= 0.5f;
+    if (midSide)
+        encodeMidSide (buffer, numCh, n);
+
     juce::dsp::AudioBlock<float> block (buffer.getArrayOfWritePointers(),
                                         static_cast<size_t> (numCh),
                                         static_cast<size_t> (n));
@@ -207,6 +249,9 @@ void MC2AudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::Mi
     engine.process (chans, numCh, static_cast<int> (up.getNumSamples()));
 
     ovs.processSamplesDown (block);
+
+    if (midSide)
+        decodeMidSide (buffer, numCh, n);
 
     for (int c = 0; c < 2; ++c)
     {

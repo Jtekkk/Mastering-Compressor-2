@@ -52,6 +52,8 @@ private:
     juce::ComboBox oversamplingBox;
     std::unique_ptr<ComboBoxAttachment> oversamplingAttachment;
 
+    juce::TextButton msToggle;
+
     std::vector<std::unique_ptr<SliderAttachment>> sliderAttachments;
     std::vector<std::unique_ptr<ButtonAttachment>> buttonAttachments;
 

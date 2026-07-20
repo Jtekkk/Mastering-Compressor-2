@@ -84,6 +84,7 @@ private:
     std::atomic<float>* pEqLow     = nullptr;
     std::atomic<float>* pEqAir     = nullptr;
     std::atomic<float>* pOversampling = nullptr;
+    std::atomic<float>* pMsMode    = nullptr;
     juce::AudioParameterBool* bypassParam = nullptr;
     int currentProgramIndex = 0;
 

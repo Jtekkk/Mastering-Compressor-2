@@ -87,6 +87,11 @@ MC2AudioProcessorEditor::MC2AudioProcessorEditor (MC2AudioProcessor& p)
     oversamplingAttachment = std::make_unique<ComboBoxAttachment> (
         proc.apvts, ParamID::oversampling, oversamplingBox);
 
+    addAndMakeVisible (msToggle);
+    msToggle.setClickingTogglesState (true);
+    msToggle.setTooltip ("Process Mid/Side instead of Left/Right");
+    buttonAttachments.push_back (std::make_unique<ButtonAttachment> (proc.apvts, ParamID::msMode, msToggle));
+
     startTimerHz (30);
     setSize (kWidth, kHeight);
 }
@@ -148,6 +153,7 @@ void MC2AudioProcessorEditor::resized()
 {
     // preset browser + undo/redo strip, fixed to the top of the window
     presetBox.setBounds (16, (kTopBarH - 22) / 2, 220, 22);
+    msToggle.setBounds (260, (kTopBarH - 22) / 2, 100, 22);
     redoButton.setBounds (kWidth - 16 - 64, (kTopBarH - 22) / 2, 64, 22);
     undoButton.setBounds (redoButton.getX() - 6 - 64, (kTopBarH - 22) / 2, 64, 22);
 
@@ -317,6 +323,8 @@ void MC2AudioProcessorEditor::timerCallback()
                         juce::dontSendNotification);
     truePeakLabel.setText (juce::String::formatted ("TP %+.1f dBTP", proc.meterTruePeakDB.load()),
                            juce::dontSendNotification);
+
+    msToggle.setButtonText (msToggle.getToggleState() ? "M/S" : "STEREO");
 
     const bool bypassed = pBypass != nullptr && pBypass->load() >= 0.5f;
     const bool outputMode = pMeterMode != nullptr && pMeterMode->load() >= 0.5f;
