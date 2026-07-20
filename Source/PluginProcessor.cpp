@@ -87,6 +87,10 @@ void MC2AudioProcessor::prepareToPlay (double sampleRate, int samplesPerBlock)
     engine.prepare (sampleRate * 2.0, samplesPerBlock * 2);
     updateEngineParams();
 
+    // Loudness/true-peak metering runs on the real output rate, not the
+    // engine's internal 2x-oversampled rate.
+    loudnessMeter.prepare (sampleRate, (int) numCh);
+
     setLatencySamples (juce::roundToInt (oversampler->getLatencyInSamples()));
 }
 
@@ -95,6 +99,7 @@ void MC2AudioProcessor::releaseResources()
     if (oversampler != nullptr)
         oversampler->reset();
     engine.reset();
+    loudnessMeter.reset();
 }
 
 void MC2AudioProcessor::updateEngineParams()
@@ -148,6 +153,7 @@ void MC2AudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::Mi
             meterGrDB[c].store (0.0f);
             meterOutRms[c].store (buffer.getRMSLevel (src, 0, n));
         }
+        updateLoudnessMeters (buffer, numCh, n);
         return;
     }
 
@@ -172,6 +178,19 @@ void MC2AudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::Mi
         meterGrDB[c].store (engine.getGainReductionDB (src));
         meterOutRms[c].store (engine.getOutputRms (src));
     }
+    updateLoudnessMeters (buffer, numCh, n);
+}
+
+void MC2AudioProcessor::updateLoudnessMeters (const juce::AudioBuffer<float>& buffer, int numCh, int n)
+{
+    const float* chans[2] = { nullptr, nullptr };
+    for (int c = 0; c < numCh; ++c)
+        chans[c] = buffer.getReadPointer (c);
+
+    loudnessMeter.process (chans, numCh, n);
+    meterLufsI.store (loudnessMeter.getIntegratedLUFS());
+    meterLufsS.store (loudnessMeter.getShortTermLUFS());
+    meterTruePeakDB.store (loudnessMeter.getTruePeakDB());
 }
 
 juce::AudioProcessorEditor* MC2AudioProcessor::createEditor()

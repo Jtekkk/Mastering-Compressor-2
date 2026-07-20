@@ -3,6 +3,7 @@
 // printed on the front panel actually holds.
 
 #include "DSP/MC2Engine.h"
+#include "DSP/Metering.h"
 
 #include <cmath>
 #include <cstdio>
@@ -501,6 +502,101 @@ int main()
         float* chans[1] = { s.l.data() };
         e.process (chans, 1, s.size());
         CHECK (e.getGainReductionDB (0) > 1.0f, "mono operation works");
+    }
+
+    // --------------------------------------------------------- LUFS / true peak --
+    {
+        mc2::LoudnessMeter meter;
+        meter.prepare (kFs, 2);
+        Stereo silence ((int) (2.0 * kFs));
+        float* chans[2] = { silence.l.data(), silence.r.data() };
+        meter.process (chans, 2, silence.size());
+        std::printf ("  info : silence -> LUFS-I %.1f, LUFS-S %.1f\n",
+                     meter.getIntegratedLUFS(), meter.getShortTermLUFS());
+        CHECK (meter.getIntegratedLUFS() <= -69.0f, "silence never crosses the LUFS-I absolute gate");
+    }
+
+    {
+        auto lufsIFor = [&] (float peakDB) {
+            mc2::LoudnessMeter meter;
+            meter.prepare (kFs, 1);
+            auto s = sine (1000.0, peakDB, 2.0);
+            float* chans[1] = { s.l.data() };
+            meter.process (chans, 1, s.size());
+            return meter.getIntegratedLUFS();
+        };
+
+        const float lufsHot   = lufsIFor (0.0f);
+        const float lufsQuiet = lufsIFor (-12.0f);
+        std::printf ("  info : LUFS-I @0 dBFS %.2f vs @-12 dBFS %.2f (diff %.2f dB)\n",
+                     lufsHot, lufsQuiet, lufsHot - lufsQuiet);
+        CHECK (std::fabs ((lufsHot - lufsQuiet) - 12.0f) < 0.5f,
+               "LUFS-I tracks input level 1:1 (K-weighting doesn't change with level)");
+    }
+
+    {
+        mc2::LoudnessMeter meterCombined;
+        meterCombined.prepare (kFs, 1);
+        auto loud = sine (1000.0, 0.0f, 3.0);
+        {
+            float* chans[1] = { loud.l.data() };
+            meterCombined.process (chans, 1, loud.size());
+        }
+        Stereo quiet ((int) (3.0 * kFs));
+        {
+            float* chans[1] = { quiet.l.data() };
+            meterCombined.process (chans, 1, quiet.size());
+        }
+        const float lufsCombined = meterCombined.getIntegratedLUFS();
+
+        mc2::LoudnessMeter meterLoudAlone;
+        meterLoudAlone.prepare (kFs, 1);
+        auto loudAlone = sine (1000.0, 0.0f, 3.0);
+        float* chansAlone[1] = { loudAlone.l.data() };
+        meterLoudAlone.process (chansAlone, 1, loudAlone.size());
+        const float lufsLoudAlone = meterLoudAlone.getIntegratedLUFS();
+
+        std::printf ("  info : LUFS-I loud+quiet %.2f vs loud-alone %.2f (gate should reject the quiet half)\n",
+                     lufsCombined, lufsLoudAlone);
+        CHECK (std::fabs (lufsCombined - lufsLoudAlone) < 0.5f,
+               "relative gate excludes a quiet half instead of averaging it in");
+    }
+
+    {
+        auto s = sine (997.0, 0.0f, 0.5);
+        float samplePeak = 0.0f;
+        for (float v : s.l) samplePeak = std::max (samplePeak, std::fabs (v));
+        const float samplePeakDB = 20.0f * std::log10 (samplePeak);
+
+        mc2::LoudnessMeter meter;
+        meter.prepare (kFs, 1);
+        float* chans[1] = { s.l.data() };
+        meter.process (chans, 1, s.size());
+
+        std::printf ("  info : 0 dBFS 997 Hz tone -> sample peak %.3f dB, true peak %.3f dBTP\n",
+                     samplePeakDB, meter.getTruePeakDB());
+        CHECK (meter.getTruePeakDB() >= samplePeakDB - 0.01f,
+               "true-peak estimate is never below the plain sample peak");
+    }
+
+    {
+        // A two-sample 0 dBFS pulse bracketed by silence: Catmull-Rom
+        // interpolation between the two full-scale samples (0,1,1,0 as the
+        // four control points) overshoots to 1.125 at the midpoint - a real
+        // inter-sample over a plain sample-peak reading (0.0 dB) would miss.
+        std::vector<float> pulse (20, 0.0f);
+        pulse[10] = 1.0f;
+        pulse[11] = 1.0f;
+
+        mc2::LoudnessMeter meter;
+        meter.prepare (kFs, 1);
+        float* chans[1] = { pulse.data() };
+        meter.process (chans, 1, (int) pulse.size());
+
+        std::printf ("  info : two-sample 0 dBFS pulse -> true peak %.2f dBTP (sample peak is exactly 0.0)\n",
+                     meter.getTruePeakDB());
+        CHECK (meter.getTruePeakDB() > 0.5f,
+               "true-peak estimator catches an inter-sample over a plain sample peak would miss");
     }
 
     std::printf (failures == 0 ? "\nALL CHECKS PASSED\n"

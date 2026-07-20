@@ -4,6 +4,7 @@
 #include <juce_dsp/juce_dsp.h>
 
 #include "DSP/MC2Engine.h"
+#include "DSP/Metering.h"
 #include "Params.h"
 
 class MC2AudioProcessor : public juce::AudioProcessor
@@ -45,11 +46,16 @@ public:
     // Meter feed for the editor (lock-free).
     std::atomic<float> meterGrDB[2]  { 0.0f, 0.0f };
     std::atomic<float> meterOutRms[2] { 0.0f, 0.0f };
+    std::atomic<float> meterLufsI      { -70.0f };
+    std::atomic<float> meterLufsS      { -70.0f };
+    std::atomic<float> meterTruePeakDB { -100.0f };
 
 private:
     void updateEngineParams();
+    void updateLoudnessMeters (const juce::AudioBuffer<float>& buffer, int numCh, int n);
 
     mc2::MC2Engine engine;
+    mc2::LoudnessMeter loudnessMeter;
     std::unique_ptr<juce::dsp::Oversampling<float>> oversampler;
 
     // Cached raw parameter pointers (atomics owned by the APVTS).

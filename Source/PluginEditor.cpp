@@ -75,6 +75,12 @@ MC2AudioProcessorEditor::MC2AudioProcessorEditor (MC2AudioProcessor& p)
     undoButton.onClick = [this] { proc.undoManager.undo(); };
     redoButton.onClick = [this] { proc.undoManager.redo(); };
 
+    for (auto* label : { &lufsILabel, &lufsSLabel, &truePeakLabel })
+    {
+        label->setJustificationType (juce::Justification::centred);
+        addAndMakeVisible (*label);
+    }
+
     startTimerHz (30);
     setSize (kWidth, kHeight);
 }
@@ -138,6 +144,12 @@ void MC2AudioProcessorEditor::resized()
     presetBox.setBounds (16, (kTopBarH - 22) / 2, 220, 22);
     redoButton.setBounds (kWidth - 16 - 64, (kTopBarH - 22) / 2, 64, 22);
     undoButton.setBounds (redoButton.getX() - 6 - 64, (kTopBarH - 22) / 2, 64, 22);
+
+    // LUFS-I / LUFS-S / true-peak readout, centred between the preset
+    // browser and the undo/redo pair
+    lufsILabel.setBounds    (420, (kTopBarH - 22) / 2, 130, 22);
+    lufsSLabel.setBounds    (560, (kTopBarH - 22) / 2, 130, 22);
+    truePeakLabel.setBounds (700, (kTopBarH - 22) / 2, 130, 22);
 
     meterL.setBounds (24, 46 + kTopBarH, 350, 244);
     meterR.setBounds (kWidth - 24 - 350, 46 + kTopBarH, 350, 244);
@@ -291,6 +303,13 @@ void MC2AudioProcessorEditor::timerCallback()
     }
     undoButton.setEnabled (proc.undoManager.canUndo());
     redoButton.setEnabled (proc.undoManager.canRedo());
+
+    lufsILabel.setText (juce::String::formatted ("LUFS-I %.1f", proc.meterLufsI.load()),
+                        juce::dontSendNotification);
+    lufsSLabel.setText (juce::String::formatted ("LUFS-S %.1f", proc.meterLufsS.load()),
+                        juce::dontSendNotification);
+    truePeakLabel.setText (juce::String::formatted ("TP %+.1f dBTP", proc.meterTruePeakDB.load()),
+                           juce::dontSendNotification);
 
     const bool bypassed = pBypass != nullptr && pBypass->load() >= 0.5f;
     const bool outputMode = pMeterMode != nullptr && pMeterMode->load() >= 0.5f;

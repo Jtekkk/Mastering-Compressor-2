@@ -156,6 +156,26 @@ To cut a release:
 CMakeLists version, runs the same three-platform build, then packages and
 attaches a `.zip` per platform to a new GitHub Release.
 
+## Beyond the hardware
+
+A few conveniences the original circuit never had:
+
+* **Factory presets** — Vocal Glue, Mix Bus, Drum Bus, Master Gentle and Loud
+  Master, in the `PRESETS` dropdown top-left. They're also exposed through
+  the standard host program API, so hosts with their own preset browser see
+  them too.
+* **Undo/redo** — every parameter change goes through a `juce::UndoManager`;
+  the `UNDO`/`REDO` pair top-right walks it back and forward. Rapid knob
+  drags collapse into one step roughly every half second.
+* **LUFS-I / LUFS-S / true-peak metering** (`Source/DSP/Metering.h`) — a
+  mixing/mastering reference loudness meter, not a certified compliance
+  measurement: K-weighting via RBJ-cookbook filters shaped to the ITU-R
+  BS.1770 K-curve, the standard two-stage gated block scheme for integrated
+  loudness (400 ms blocks, 100 ms step, -70 LUFS absolute gate, -10 LU
+  relative gate), an ungated 3 s window for short-term, and a 4x Catmull-Rom
+  true-peak estimate (can register inter-sample overs a plain sample-peak
+  reading would miss). Read out top-centre in the plugin header.
+
 ## Controls
 
 | Control | Range | Notes |

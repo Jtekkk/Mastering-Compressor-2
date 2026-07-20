@@ -46,6 +46,8 @@ private:
     juce::TextButton undoButton { "UNDO" }, redoButton { "REDO" };
     int undoTransactionCountdown = 0;
 
+    juce::Label lufsILabel, lufsSLabel, truePeakLabel;
+
     std::vector<std::unique_ptr<SliderAttachment>> sliderAttachments;
     std::vector<std::unique_ptr<ButtonAttachment>> buttonAttachments;
 
