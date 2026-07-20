@@ -31,6 +31,8 @@ MC2AudioProcessorEditor::MC2AudioProcessorEditor (MC2AudioProcessor& p)
     addAndMakeVisible (meterR);
     addAndMakeVisible (tubeWindow);
     addAndMakeVisible (grHistory);
+    addAndMakeVisible (spectrum);
+    spectrum.setSampleRate (proc.getSampleRate());
 
     setupKnob (inputKnob,     ParamID::input,     13);
     setupKnob (thresholdKnob, ParamID::threshold, 17);
@@ -191,8 +193,15 @@ void MC2AudioProcessorEditor::resized()
     calLKnob.setBounds   (lowerStation (5));
     calRKnob.setBounds   (lowerStation (6));
 
-    // GR history strip, below the vintage panel
-    grHistory.setBounds (24, kPanelBottom + 8, kWidth - 48, kGraphBarH - 16);
+    // GR history + spectrum strip, below the vintage panel, split in half
+    {
+        const int y = kPanelBottom + 8;
+        const int h = kGraphBarH - 16;
+        const int gap = 8;
+        const int halfW = (kWidth - 48 - gap) / 2;
+        grHistory.setBounds (24, y, halfW, h);
+        spectrum.setBounds (24 + halfW + gap, y, halfW, h);
+    }
 }
 
 void MC2AudioProcessorEditor::paint (juce::Graphics& g)
@@ -365,4 +374,7 @@ void MC2AudioProcessorEditor::timerCallback()
 
     tubeWindow.setGlow (bypassed ? 0.15f : grSum * 0.5f / 12.0f);
     grHistory.pushSample (grSum * 0.5f);
+
+    spectrum.setSampleRate (proc.getSampleRate());
+    spectrum.update (proc.scopeBuffer, proc.scopeWritePos.load (std::memory_order_relaxed));
 }

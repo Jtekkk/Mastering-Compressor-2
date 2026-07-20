@@ -5,6 +5,7 @@
 
 #include "GUI/GrHistoryGraph.h"
 #include "GUI/MC2LookAndFeel.h"
+#include "GUI/SpectrumAnalyzer.h"
 #include "GUI/VUMeter.h"
 #include "PluginProcessor.h"
 
@@ -39,6 +40,7 @@ private:
     VUMeter meterL { "LEFT" }, meterR { "RIGHT" };
     TubeWindow tubeWindow;
     GrHistoryGraph grHistory;
+    SpectrumAnalyzer spectrum;
 
     juce::Slider inputKnob, thresholdKnob, attackKnob, outputKnob;
     juce::Slider recoverySwitch, rectifierSwitch, scEqSwitch;

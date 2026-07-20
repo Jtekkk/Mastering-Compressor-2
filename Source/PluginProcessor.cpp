@@ -227,7 +227,7 @@ void MC2AudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::Mi
             meterGrDB[c].store (0.0f);
             meterOutRms[c].store (buffer.getRMSLevel (src, 0, n));
         }
-        updateLoudnessMeters (buffer, numCh, n);
+        updateMeters (buffer, numCh, n);
         return;
     }
 
@@ -262,7 +262,7 @@ void MC2AudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::Mi
     updateLoudnessMeters (buffer, numCh, n);
 }
 
-void MC2AudioProcessor::updateLoudnessMeters (const juce::AudioBuffer<float>& buffer, int numCh, int n)
+void MC2AudioProcessor::updateMeters (const juce::AudioBuffer<float>& buffer, int numCh, int n)
 {
     const float* chans[2] = { nullptr, nullptr };
     for (int c = 0; c < numCh; ++c)
@@ -272,6 +272,19 @@ void MC2AudioProcessor::updateLoudnessMeters (const juce::AudioBuffer<float>& bu
     meterLufsI.store (loudnessMeter.getIntegratedLUFS());
     meterLufsS.store (loudnessMeter.getShortTermLUFS());
     meterTruePeakDB.store (loudnessMeter.getTruePeakDB());
+
+    int pos = scopeWritePos.load (std::memory_order_relaxed);
+    for (int i = 0; i < n; ++i)
+    {
+        float mono = 0.0f;
+        for (int c = 0; c < numCh; ++c)
+            mono += chans[c][i];
+        mono /= (float) numCh;
+
+        scopeBuffer[(size_t) pos] = mono;
+        pos = (pos + 1) % kScopeSize;
+    }
+    scopeWritePos.store (pos, std::memory_order_relaxed);
 }
 
 juce::AudioProcessorEditor* MC2AudioProcessor::createEditor()

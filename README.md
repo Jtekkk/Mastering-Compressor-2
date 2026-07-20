@@ -191,6 +191,9 @@ A few conveniences the original circuit never had:
 * **GR history graph** — a scrolling amber trace of the last ~10 s of gain
   reduction, in its own strip below the front panel (0 dB at the top,
   deeper reduction pulling the trace down).
+* **Spectrum analyzer** — a 2048-point FFT (Hann window, log frequency axis,
+  20 Hz-Nyquist) of the mono-summed output, sharing the bottom strip with
+  the GR history graph. A glance view, not a calibrated measurement.
 
 ## Controls
 

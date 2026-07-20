@@ -52,9 +52,18 @@ public:
     std::atomic<float> meterLufsS      { -70.0f };
     std::atomic<float> meterTruePeakDB { -100.0f };
 
+    // Mono (post-processing) scope feed for the spectrum analyzer: a plain
+    // circular buffer, only the write position is atomic. This is a display
+    // only - a torn read under a concurrent audio-thread write costs the
+    // analyzer a stale sample for one frame at worst, never a crash, so a
+    // lock or full SPSC fifo would be needless ceremony here.
+    static constexpr int kScopeSize = 2048; // must match SpectrumAnalyzer::kFftSize
+    std::array<float, (size_t) kScopeSize> scopeBuffer {};
+    std::atomic<int> scopeWritePos { 0 };
+
 private:
     void updateEngineParams();
-    void updateLoudnessMeters (const juce::AudioBuffer<float>& buffer, int numCh, int n);
+    void updateMeters (const juce::AudioBuffer<float>& buffer, int numCh, int n);
     void applyOversamplingIndex (int idx);
 
     mc2::MC2Engine engine;
