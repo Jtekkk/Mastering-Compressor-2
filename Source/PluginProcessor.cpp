@@ -1,11 +1,12 @@
 #include "PluginProcessor.h"
 #include "PluginEditor.h"
+#include "Presets.h"
 
 MC2AudioProcessor::MC2AudioProcessor()
     : AudioProcessor (BusesProperties()
                           .withInput ("Input", juce::AudioChannelSet::stereo(), true)
                           .withOutput ("Output", juce::AudioChannelSet::stereo(), true)),
-      apvts (*this, nullptr, "MC2", createParameterLayout())
+      apvts (*this, &undoManager, "MC2", createParameterLayout())
 {
     pInput     = apvts.getRawParameterValue (ParamID::input);
     pThreshold = apvts.getRawParameterValue (ParamID::threshold);
@@ -21,6 +22,41 @@ MC2AudioProcessor::MC2AudioProcessor()
     pEqAir     = apvts.getRawParameterValue (ParamID::eqAir);
 
     bypassParam = dynamic_cast<juce::AudioParameterBool*> (apvts.getParameter (ParamID::bypass));
+}
+
+int MC2AudioProcessor::getNumPrograms()
+{
+    // Program 0 is "Default" (whatever the current knob settings are);
+    // programs 1..N are the factory presets below it.
+    return 1 + (int) mc2presets::factoryPresets().size();
+}
+
+const juce::String MC2AudioProcessor::getProgramName (int index)
+{
+    if (index <= 0)
+        return "Default";
+
+    const auto& presets = mc2presets::factoryPresets();
+    if (index - 1 < (int) presets.size())
+        return presets[(size_t) (index - 1)].name;
+
+    return {};
+}
+
+void MC2AudioProcessor::setCurrentProgram (int index)
+{
+    const auto& presets = mc2presets::factoryPresets();
+    if (index < 0 || index > (int) presets.size())
+        return;
+
+    currentProgramIndex = index;
+
+    if (index == 0)
+        return; // "Default" leaves whatever is currently dialled in alone
+
+    const auto& preset = presets[(size_t) (index - 1)];
+    undoManager.beginNewTransaction ("Load preset: " + juce::String (preset.name));
+    mc2presets::apply (apvts, preset);
 }
 
 bool MC2AudioProcessor::isBusesLayoutSupported (const BusesLayout& layouts) const

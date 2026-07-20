@@ -42,6 +42,10 @@ private:
     juce::Slider eqLowKnob, eqAirKnob, calLKnob, calRKnob;
     juce::ToggleButton modeToggle, linkToggle, eqInToggle, meterToggle, bypassToggle;
 
+    juce::ComboBox presetBox;
+    juce::TextButton undoButton { "UNDO" }, redoButton { "REDO" };
+    int undoTransactionCountdown = 0;
+
     std::vector<std::unique_ptr<SliderAttachment>> sliderAttachments;
     std::vector<std::unique_ptr<ButtonAttachment>> buttonAttachments;
 

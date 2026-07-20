@@ -1,12 +1,15 @@
 #include "PluginEditor.h"
+#include "Presets.h"
 
 namespace
 {
     constexpr int kWidth  = 1180;
-    constexpr int kHeight = 580;
-    constexpr int kMainRowY    = 312;
+    constexpr int kTopBarH = 32;   // preset browser + undo/redo strip
+    constexpr int kPanelH  = 580;  // the original front-panel artwork height
+    constexpr int kHeight  = kPanelH + kTopBarH;
+    constexpr int kMainRowY    = 312 + kTopBarH;
     constexpr int kMainRowH    = 122;
-    constexpr int kLowerRowY   = 462;
+    constexpr int kLowerRowY   = 462 + kTopBarH;
     constexpr int kLowerRowH   = 100;
 
     constexpr float kPi = juce::MathConstants<float>::pi;
@@ -50,6 +53,27 @@ MC2AudioProcessorEditor::MC2AudioProcessorEditor (MC2AudioProcessor& p)
     pCalL      = proc.apvts.getRawParameterValue (ParamID::calL);
     pCalR      = proc.apvts.getRawParameterValue (ParamID::calR);
     pBypass    = proc.apvts.getRawParameterValue (ParamID::bypass);
+
+    addAndMakeVisible (presetBox);
+    presetBox.setTextWhenNothingSelected ("PRESETS");
+    presetBox.addItem ("Default", 1);
+    {
+        int itemId = 2;
+        for (auto& preset : mc2presets::factoryPresets())
+            presetBox.addItem (preset.name, itemId++);
+    }
+    presetBox.setSelectedId (proc.getCurrentProgram() + 1, juce::dontSendNotification);
+    presetBox.onChange = [this]
+    {
+        const int id = presetBox.getSelectedId();
+        if (id > 0)
+            proc.setCurrentProgram (id - 1);
+    };
+
+    addAndMakeVisible (undoButton);
+    addAndMakeVisible (redoButton);
+    undoButton.onClick = [this] { proc.undoManager.undo(); };
+    redoButton.onClick = [this] { proc.undoManager.redo(); };
 
     startTimerHz (30);
     setSize (kWidth, kHeight);
@@ -110,12 +134,17 @@ juce::Rectangle<int> MC2AudioProcessorEditor::lowerStation (int index) const
 
 void MC2AudioProcessorEditor::resized()
 {
-    meterL.setBounds (24, 46, 350, 244);
-    meterR.setBounds (kWidth - 24 - 350, 46, 350, 244);
-    tubeWindow.setBounds (462, 56, 256, 122);
+    // preset browser + undo/redo strip, fixed to the top of the window
+    presetBox.setBounds (16, (kTopBarH - 22) / 2, 220, 22);
+    redoButton.setBounds (kWidth - 16 - 64, (kTopBarH - 22) / 2, 64, 22);
+    undoButton.setBounds (redoButton.getX() - 6 - 64, (kTopBarH - 22) / 2, 64, 22);
+
+    meterL.setBounds (24, 46 + kTopBarH, 350, 244);
+    meterR.setBounds (kWidth - 24 - 350, 46 + kTopBarH, 350, 244);
+    tubeWindow.setBounds (462, 56 + kTopBarH, 256, 122);
 
     // bypass paddle under the tube window
-    bypassToggle.setBounds (kWidth / 2 - 36, 208, 72, 82);
+    bypassToggle.setBounds (kWidth / 2 - 36, 208 + kTopBarH, 72, 82);
 
     inputKnob.setBounds     (mainStation (0));
     thresholdKnob.setBounds (mainStation (1));
@@ -139,44 +168,50 @@ void MC2AudioProcessorEditor::paint (juce::Graphics& g)
 {
     using namespace juce;
 
+    // preset / undo bar, fixed to the very top of the window
+    g.setColour (Colour (0xff14171c));
+    g.fillRect (0, 0, kWidth, kTopBarH);
+    g.setColour (mc2gui::silkDim.withAlpha (0.4f));
+    g.drawHorizontalLine (kTopBarH - 1, 0.0f, (float) kWidth);
+
     // panel
-    g.setGradientFill (ColourGradient (mc2gui::panelTop, 0.0f, 0.0f,
+    g.setGradientFill (ColourGradient (mc2gui::panelTop, 0.0f, (float) kTopBarH,
                                        mc2gui::panelBottom, 0.0f, (float) kHeight, false));
-    g.fillAll();
+    g.fillRect (0, kTopBarH, kWidth, kPanelH);
 
     // subtle brushed texture
     g.setColour (Colours::white.withAlpha (0.018f));
-    for (int yy = 8; yy < kHeight; yy += 7)
+    for (int yy = kTopBarH + 8; yy < kHeight; yy += 7)
         g.drawHorizontalLine (yy, 0.0f, (float) kWidth);
 
     // header
     g.setColour (mc2gui::silk);
     g.setFont (mc2gui::silkFont (16.0f));
-    g.drawText ("JTEKK AUDIO", 26, 8, 220, 22, Justification::centredLeft);
+    g.drawText ("JTEKK AUDIO", 26, 8 + kTopBarH, 220, 22, Justification::centredLeft);
 
     g.setFont (mc2gui::silkFont (13.0f));
     g.drawText ("MC-2   TWIN-TUBE VARI-MU MASTERING COMPRESSOR",
-                0, 10, kWidth, 18, Justification::centred);
+                0, 10 + kTopBarH, kWidth, 18, Justification::centred);
 
     g.setColour (mc2gui::silkDim);
     g.setFont (mc2gui::silkFont (9.0f));
     g.drawText (String::fromUTF8 ("BALANCED I/O   \xc2\xb7   120 V B+   \xc2\xb7   ALL-TUBE CLASS A"),
-                kWidth - 360 - 26, 12, 360, 14, Justification::centredRight);
+                kWidth - 360 - 26, 12 + kTopBarH, 360, 14, Justification::centredRight);
 
     g.setColour (mc2gui::silkDim.withAlpha (0.5f));
-    g.drawHorizontalLine (38, 20.0f, (float) kWidth - 20.0f);
+    g.drawHorizontalLine (38 + kTopBarH, 20.0f, (float) kWidth - 20.0f);
 
     // centre block captions
     g.setColour (mc2gui::silkDim);
     g.setFont (mc2gui::silkFont (8.5f));
-    g.drawText ("VARIABLE-GAIN TWIN TRIODES", 462, 182, 256, 11, Justification::centred);
+    g.drawText ("VARIABLE-GAIN TWIN TRIODES", 462, 182 + kTopBarH, 256, 11, Justification::centred);
     g.setColour (mc2gui::silk);
     g.setFont (mc2gui::silkFont (10.0f));
-    g.drawText ("HARD-WIRE", kWidth / 2 - 70, 197, 140, 11, Justification::centred);
+    g.drawText ("HARD-WIRE", kWidth / 2 - 70, 197 + kTopBarH, 140, 11, Justification::centred);
 
     // power jewel
     {
-        const Point<float> lamp (438.0f, 244.0f);
+        const Point<float> lamp (438.0f, 244.0f + (float) kTopBarH);
         ColourGradient gl (mc2gui::accentRed.brighter (0.6f), lamp.x, lamp.y,
                            mc2gui::accentRed.withAlpha (0.0f), lamp.x + 16.0f, lamp.y + 16.0f, true);
         gl.isRadial = true;
@@ -232,8 +267,9 @@ void MC2AudioProcessorEditor::paint (juce::Graphics& g)
                       lowerStation (7).withY (kLowerRowY + 14).withHeight (56),
                       Justification::centred, 3);
 
-    // corner screws
-    for (auto c : { Point<float> (14.0f, 14.0f), Point<float> ((float) kWidth - 14.0f, 14.0f),
+    // corner screws (panel corners, not the window's - the preset bar sits above)
+    for (auto c : { Point<float> (14.0f, 14.0f + (float) kTopBarH),
+                    Point<float> ((float) kWidth - 14.0f, 14.0f + (float) kTopBarH),
                     Point<float> (14.0f, (float) kHeight - 14.0f),
                     Point<float> ((float) kWidth - 14.0f, (float) kHeight - 14.0f) })
     {
@@ -246,6 +282,16 @@ void MC2AudioProcessorEditor::paint (juce::Graphics& g)
 
 void MC2AudioProcessorEditor::timerCallback()
 {
+    // Collapse rapid knob-drag changes into one undo step roughly every
+    // half second, rather than one step per audio-thread parameter tick.
+    if (--undoTransactionCountdown <= 0)
+    {
+        undoTransactionCountdown = 15; // 15 ticks @ 30 Hz = 0.5 s
+        proc.undoManager.beginNewTransaction();
+    }
+    undoButton.setEnabled (proc.undoManager.canUndo());
+    redoButton.setEnabled (proc.undoManager.canRedo());
+
     const bool bypassed = pBypass != nullptr && pBypass->load() >= 0.5f;
     const bool outputMode = pMeterMode != nullptr && pMeterMode->load() >= 0.5f;
     const float cal[2] = { pCalL != nullptr ? pCalL->load() : 0.0f,

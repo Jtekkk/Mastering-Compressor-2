@@ -40,6 +40,18 @@ public:
         setColour (juce::TextEditor::textColourId, mc2gui::silk);
         setColour (juce::TextEditor::highlightColourId, mc2gui::amber.withAlpha (0.4f));
         setColour (juce::TextEditor::focusedOutlineColourId, mc2gui::silkDim);
+
+        // preset browser / undo-redo strip
+        setColour (juce::ComboBox::textColourId, mc2gui::silk);
+        setColour (juce::ComboBox::backgroundColourId, juce::Colour (0xff20252c));
+        setColour (juce::ComboBox::outlineColourId, mc2gui::silkDim.withAlpha (0.5f));
+        setColour (juce::ComboBox::arrowColourId, mc2gui::silkDim);
+        setColour (juce::PopupMenu::backgroundColourId, juce::Colour (0xff1c2026));
+        setColour (juce::PopupMenu::textColourId, mc2gui::silk);
+        setColour (juce::PopupMenu::highlightedBackgroundColourId, mc2gui::amber.withAlpha (0.25f));
+        setColour (juce::TextButton::buttonColourId, juce::Colour (0xff20252c));
+        setColour (juce::TextButton::textColourOffId, mc2gui::silkDim);
+        setColour (juce::TextButton::textColourOnId, mc2gui::silk);
     }
 
     juce::Font getLabelFont (juce::Label&) override

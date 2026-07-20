@@ -26,10 +26,10 @@ public:
     bool isMidiEffect() const override                    { return false; }
     double getTailLengthSeconds() const override          { return 0.0; }
 
-    int getNumPrograms() override                         { return 1; }
-    int getCurrentProgram() override                      { return 0; }
-    void setCurrentProgram (int) override                 {}
-    const juce::String getProgramName (int) override      { return {}; }
+    int getNumPrograms() override;
+    int getCurrentProgram() override                      { return currentProgramIndex; }
+    void setCurrentProgram (int index) override;
+    const juce::String getProgramName (int index) override;
     void changeProgramName (int, const juce::String&) override {}
 
     void getStateInformation (juce::MemoryBlock& destData) override;
@@ -37,6 +37,9 @@ public:
 
     juce::AudioProcessorParameter* getBypassParameter() const override { return bypassParam; }
 
+    // Declared before apvts: JUCE constructs members in declaration order, and
+    // the APVTS needs the manager to already exist to wire undo/redo through it.
+    juce::UndoManager undoManager;
     juce::AudioProcessorValueTreeState apvts;
 
     // Meter feed for the editor (lock-free).
@@ -63,6 +66,7 @@ private:
     std::atomic<float>* pEqLow     = nullptr;
     std::atomic<float>* pEqAir     = nullptr;
     juce::AudioParameterBool* bypassParam = nullptr;
+    int currentProgramIndex = 0;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (MC2AudioProcessor)
 };
