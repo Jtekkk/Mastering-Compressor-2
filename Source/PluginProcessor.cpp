@@ -20,6 +20,7 @@ MC2AudioProcessor::MC2AudioProcessor()
     pEqIn      = apvts.getRawParameterValue (ParamID::eqIn);
     pEqLow     = apvts.getRawParameterValue (ParamID::eqLow);
     pEqAir     = apvts.getRawParameterValue (ParamID::eqAir);
+    pOversampling = apvts.getRawParameterValue (ParamID::oversampling);
 
     bypassParam = dynamic_cast<juce::AudioParameterBool*> (apvts.getParameter (ParamID::bypass));
 }
@@ -75,31 +76,56 @@ void MC2AudioProcessor::prepareToPlay (double sampleRate, int samplesPerBlock)
 {
     const auto numCh = static_cast<size_t> (juce::jmax (1, getTotalNumOutputChannels()));
 
-    // The whole signal path runs 2x oversampled: the tube curvature stays
-    // alias-free and the detector resolution doubles. Linear-phase FIR
-    // halfbands, latency reported to the host.
-    oversampler = std::make_unique<juce::dsp::Oversampling<float>> (
-        numCh, 1,
-        juce::dsp::Oversampling<float>::filterHalfBandFIREquiripple,
-        true, false);
-    oversampler->initProcessing (static_cast<size_t> (samplesPerBlock));
+    hostSampleRate = sampleRate;
+    hostBlockSize  = samplesPerBlock;
 
-    engine.prepare (sampleRate * 2.0, samplesPerBlock * 2);
-    updateEngineParams();
+    // All 4 factors (1x/2x/4x/8x) are preallocated up front: the OVERSAMPLING
+    // control can switch between them at any time, not just between host
+    // prepareToPlay calls, and preallocating keeps that switch allocation-free
+    // (see applyOversamplingIndex()). Linear-phase FIR halfbands throughout;
+    // latency is reported to the host whenever the active factor changes.
+    for (int i = 0; i < (int) oversamplers.size(); ++i)
+    {
+        oversamplers[(size_t) i] = std::make_unique<juce::dsp::Oversampling<float>> (
+            numCh, (size_t) i,
+            juce::dsp::Oversampling<float>::filterHalfBandFIREquiripple,
+            true, false);
+        oversamplers[(size_t) i]->initProcessing (static_cast<size_t> (samplesPerBlock));
+    }
 
     // Loudness/true-peak metering runs on the real output rate, not the
-    // engine's internal 2x-oversampled rate.
+    // engine's internal oversampled rate.
     loudnessMeter.prepare (sampleRate, (int) numCh);
 
-    setLatencySamples (juce::roundToInt (oversampler->getLatencyInSamples()));
+    const int idx = pOversampling != nullptr
+                       ? juce::jlimit (0, (int) oversamplers.size() - 1,
+                                       static_cast<int> (pOversampling->load() + 0.5f))
+                       : activeOversamplingIdx;
+    applyOversamplingIndex (idx);
 }
 
 void MC2AudioProcessor::releaseResources()
 {
-    if (oversampler != nullptr)
-        oversampler->reset();
+    for (auto& ovs : oversamplers)
+        if (ovs != nullptr)
+            ovs->reset();
     engine.reset();
     loudnessMeter.reset();
+}
+
+void MC2AudioProcessor::applyOversamplingIndex (int idx)
+{
+    activeOversamplingIdx = idx;
+    const int factor = 1 << idx; // 1, 2, 4, 8
+
+    // MC2Engine::prepare() never allocates (fixed-size channel state), so
+    // this is safe to call here even when idx changed mid-stream, from
+    // inside processBlock.
+    engine.prepare (hostSampleRate * factor, hostBlockSize * factor);
+    updateEngineParams();
+
+    setLatencySamples (juce::roundToInt (
+        oversamplers[(size_t) activeOversamplingIdx]->getLatencyInSamples()));
 }
 
 void MC2AudioProcessor::updateEngineParams()
@@ -130,8 +156,18 @@ void MC2AudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::Mi
     for (int c = numCh; c < buffer.getNumChannels(); ++c)
         buffer.clear (c, 0, n);
 
-    if (n == 0 || numCh == 0 || oversampler == nullptr)
+    if (n == 0 || numCh == 0 || oversamplers[(size_t) activeOversamplingIdx] == nullptr)
         return;
+
+    if (pOversampling != nullptr)
+    {
+        const int desiredIdx = juce::jlimit (0, (int) oversamplers.size() - 1,
+                                             static_cast<int> (pOversampling->load() + 0.5f));
+        if (desiredIdx != activeOversamplingIdx)
+            applyOversamplingIndex (desiredIdx);
+    }
+
+    auto& ovs = *oversamplers[(size_t) activeOversamplingIdx];
 
     const bool bypassed = bypassParam != nullptr && bypassParam->get();
 
@@ -143,9 +179,9 @@ void MC2AudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::Mi
         juce::dsp::AudioBlock<float> block (buffer.getArrayOfWritePointers(),
                                             static_cast<size_t> (numCh),
                                             static_cast<size_t> (n));
-        auto up = oversampler->processSamplesUp (block);
+        auto up = ovs.processSamplesUp (block);
         juce::ignoreUnused (up);
-        oversampler->processSamplesDown (block);
+        ovs.processSamplesDown (block);
 
         for (int c = 0; c < 2; ++c)
         {
@@ -162,7 +198,7 @@ void MC2AudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::Mi
     juce::dsp::AudioBlock<float> block (buffer.getArrayOfWritePointers(),
                                         static_cast<size_t> (numCh),
                                         static_cast<size_t> (n));
-    auto up = oversampler->processSamplesUp (block);
+    auto up = ovs.processSamplesUp (block);
 
     float* chans[2] = { nullptr, nullptr };
     for (int c = 0; c < numCh; ++c)
@@ -170,7 +206,7 @@ void MC2AudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::Mi
 
     engine.process (chans, numCh, static_cast<int> (up.getNumSamples()));
 
-    oversampler->processSamplesDown (block);
+    ovs.processSamplesDown (block);
 
     for (int c = 0; c < 2; ++c)
     {

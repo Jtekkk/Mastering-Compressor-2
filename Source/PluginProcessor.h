@@ -3,6 +3,8 @@
 #include <juce_audio_processors/juce_audio_processors.h>
 #include <juce_dsp/juce_dsp.h>
 
+#include <array>
+
 #include "DSP/MC2Engine.h"
 #include "DSP/Metering.h"
 #include "Params.h"
@@ -53,10 +55,20 @@ public:
 private:
     void updateEngineParams();
     void updateLoudnessMeters (const juce::AudioBuffer<float>& buffer, int numCh, int n);
+    void applyOversamplingIndex (int idx);
 
     mc2::MC2Engine engine;
     mc2::LoudnessMeter loudnessMeter;
-    std::unique_ptr<juce::dsp::Oversampling<float>> oversampler;
+
+    // All 4 factors (1x/2x/4x/8x) are preallocated in prepareToPlay so that
+    // switching between them at runtime - which the OVERSAMPLING control
+    // allows at any time, not just between host prepareToPlay calls - never
+    // allocates on the audio thread; it's just a change of which index is
+    // active plus a (allocation-free) MC2Engine::prepare() at the new rate.
+    std::array<std::unique_ptr<juce::dsp::Oversampling<float>>, 4> oversamplers;
+    int activeOversamplingIdx = 1; // 2x, matching the parameter's default
+    double hostSampleRate = 44100.0;
+    int hostBlockSize = 512;
 
     // Cached raw parameter pointers (atomics owned by the APVTS).
     std::atomic<float>* pInput     = nullptr;
@@ -71,6 +83,7 @@ private:
     std::atomic<float>* pEqIn      = nullptr;
     std::atomic<float>* pEqLow     = nullptr;
     std::atomic<float>* pEqAir     = nullptr;
+    std::atomic<float>* pOversampling = nullptr;
     juce::AudioParameterBool* bypassParam = nullptr;
     int currentProgramIndex = 0;
 

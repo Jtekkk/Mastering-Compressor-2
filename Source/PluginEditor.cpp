@@ -81,6 +81,12 @@ MC2AudioProcessorEditor::MC2AudioProcessorEditor (MC2AudioProcessor& p)
         addAndMakeVisible (*label);
     }
 
+    addAndMakeVisible (oversamplingBox);
+    oversamplingBox.addItemList (ParamText::oversamplingChoices, 1);
+    oversamplingBox.setTooltip ("Oversampling factor");
+    oversamplingAttachment = std::make_unique<ComboBoxAttachment> (
+        proc.apvts, ParamID::oversampling, oversamplingBox);
+
     startTimerHz (30);
     setSize (kWidth, kHeight);
 }
@@ -150,6 +156,7 @@ void MC2AudioProcessorEditor::resized()
     lufsILabel.setBounds    (420, (kTopBarH - 22) / 2, 130, 22);
     lufsSLabel.setBounds    (560, (kTopBarH - 22) / 2, 130, 22);
     truePeakLabel.setBounds (700, (kTopBarH - 22) / 2, 130, 22);
+    oversamplingBox.setBounds (860, (kTopBarH - 22) / 2, 130, 22);
 
     meterL.setBounds (24, 46 + kTopBarH, 350, 244);
     meterR.setBounds (kWidth - 24 - 350, 46 + kTopBarH, 350, 244);

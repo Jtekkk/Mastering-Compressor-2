@@ -474,6 +474,55 @@ int main()
         CHECK (recoveryMonotonic, "recovery-to-37%% increases monotonically across all 5 detents");
     }
 
+    // ------------------------------------- ballistics vs. oversampling factor --
+    {
+        // The OVERSAMPLING selector re-prepares the engine at hostRate*factor;
+        // attack times are specified in real-world ms, so they must land in
+        // the same place no matter which factor (1x/2x/4x/8x) is active.
+        auto measureAttackMsAt = [&] (double engineFs) {
+            auto p = base;
+            p.attackMs = 25.0f;
+
+            float finalGr;
+            {
+                mc2::MC2Engine e2;
+                e2.prepare (engineFs, 1024);
+                e2.setParams (p);
+                auto s2 = sine (1000.0, -6.0f, 3.0, engineFs);
+                finalGr = grAfter (e2, s2);
+            }
+
+            mc2::MC2Engine e;
+            e.prepare (engineFs, 1024);
+            e.setParams (p);
+            auto s = sine (1000.0, -6.0f, 1.5, engineFs);
+
+            int block = 64, t63 = -1;
+            for (int pos = 0; pos < s.size(); pos += block)
+            {
+                const int n = std::min (block, s.size() - pos);
+                float* chans[2] = { s.l.data() + pos, s.r.data() + pos };
+                e.process (chans, 2, n);
+                if (t63 < 0 && e.getGainReductionDB (0) >= 0.63f * finalGr)
+                {
+                    t63 = pos + n;
+                    break;
+                }
+            }
+            return t63 < 0 ? 1.0e9 : 1000.0 * t63 / engineFs;
+        };
+
+        const double t1x = measureAttackMsAt (kFs / 2.0); // 1x, no oversampling
+        const double t2x = measureAttackMsAt (kFs);       // 2x, this project's default
+        const double t4x = measureAttackMsAt (kFs * 2.0); // 4x
+        const double t8x = measureAttackMsAt (kFs * 4.0); // 8x
+        std::printf ("  info : 25 ms attack at 1x/2x/4x/8x engine rates -> %.1f / %.1f / %.1f / %.1f ms\n",
+                     t1x, t2x, t4x, t8x);
+        const double maxDrift = std::max ({ std::fabs (t2x - t1x), std::fabs (t4x - t1x),
+                                            std::fabs (t8x - t1x) });
+        CHECK (maxDrift < 5.0, "attack timing stays put across the oversampling selector's 1x-8x rates");
+    }
+
     // -------------------------------------------- stereo image preservation --
     {
         auto p = base;

@@ -25,7 +25,7 @@ Every line of the hardware spec sheet and where it lives in the plugin:
 | Large illuminated Sifam meters | Two vector-drawn, lamp-lit VU meters with true logarithmic dial geometry and 300 ms ballistics; switchable GR / output, 0 VU = −18 dBFS |
 | Twin-tube design | Two cascaded triode stages per channel (input triode + 5670 mu stage), each normalised for unity gain so colour and gain stay independent |
 | Six rectifier circuits | `RECTIFIER` switch: Tube FW, Tube HW, Germanium, Silicon, Opto, RMS — each with its own detection law and ballistic scaling (`Source/DSP/Rectifiers.h`) |
-| Excellent sonic range, low noise | Whole path runs 2× oversampled (linear-phase halfbands, latency reported), double-precision filters, no added noise |
+| Excellent sonic range, low noise | Whole path runs oversampled - 2× by default, selectable 1×/2×/4×/8× (linear-phase halfbands, latency reported) - double-precision filters, no added noise |
 | Sidechain EQ | 4 built-in curves: FLAT, HP 100 Hz, HP 200 Hz + presence, HF lift 5 kHz |
 | Sweet passive EQ | Boost-only, broad low-Q shelves: LOW +0…6 dB @ 90 Hz, AIR +0…6 dB @ 12 kHz, with an in/out paddle |
 | All controls switches or detented knobs | Every parameter is stepped — settings are exactly repeatable |
@@ -175,6 +175,13 @@ A few conveniences the original circuit never had:
   relative gate), an ungated 3 s window for short-term, and a 4x Catmull-Rom
   true-peak estimate (can register inter-sample overs a plain sample-peak
   reading would miss). Read out top-centre in the plugin header.
+* **Oversampling selector (1x/2x/4x/8x)** — top bar, right of the LUFS
+  readout. All four factors are preallocated in `prepareToPlay`, so
+  switching between them at any time (not just between host prepare calls)
+  never allocates on the audio thread; the engine is simply re-prepared at
+  `hostRate x factor` and the new latency reported to the host. It's a
+  non-automatable, structural setting rather than a musical control - the
+  same reasoning as a sample-rate change, not a parameter you'd ride.
 
 ## Controls
 

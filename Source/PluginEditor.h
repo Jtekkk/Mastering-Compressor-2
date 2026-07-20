@@ -18,8 +18,9 @@ public:
     void resized() override;
 
 private:
-    using SliderAttachment = juce::AudioProcessorValueTreeState::SliderAttachment;
-    using ButtonAttachment = juce::AudioProcessorValueTreeState::ButtonAttachment;
+    using SliderAttachment   = juce::AudioProcessorValueTreeState::SliderAttachment;
+    using ButtonAttachment   = juce::AudioProcessorValueTreeState::ButtonAttachment;
+    using ComboBoxAttachment = juce::AudioProcessorValueTreeState::ComboBoxAttachment;
 
     void timerCallback() override;
 
@@ -47,6 +48,9 @@ private:
     int undoTransactionCountdown = 0;
 
     juce::Label lufsILabel, lufsSLabel, truePeakLabel;
+
+    juce::ComboBox oversamplingBox;
+    std::unique_ptr<ComboBoxAttachment> oversamplingAttachment;
 
     std::vector<std::unique_ptr<SliderAttachment>> sliderAttachments;
     std::vector<std::unique_ptr<ButtonAttachment>> buttonAttachments;
