@@ -259,7 +259,7 @@ void MC2AudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::Mi
         meterGrDB[c].store (engine.getGainReductionDB (src));
         meterOutRms[c].store (engine.getOutputRms (src));
     }
-    updateLoudnessMeters (buffer, numCh, n);
+    updateMeters (buffer, numCh, n);
 }
 
 void MC2AudioProcessor::updateMeters (const juce::AudioBuffer<float>& buffer, int numCh, int n)
