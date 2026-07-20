@@ -115,7 +115,16 @@ enumeration has been exercised under Wine as well.
 
 A headless test harness measures the engine against the spec sheet — ratios,
 attack/recovery times, all six rectifiers, sidechain curves, link behaviour,
-passive EQ and tube harmonics:
+passive EQ and tube harmonics, plus:
+
+* a **frequency response sweep** (20 Hz-20 kHz, EQ out, no GR) checking the
+  passive path stays within ±1 dB from 100 Hz-10 kHz;
+* a **THD curve** across five input levels (-24…-3 dBFS) showing the tube
+  stage's distortion climb as level increases;
+* **attack/recovery tables** across all 10 attack and 5 recovery detents,
+  each asserted to be monotonically slower than the last; and
+* a **stereo image preservation** check — a programme panned 6 dB L-over-R
+  keeps that balance within 0.3 dB after linked-stereo compression.
 
 ```bash
 cmake --build build --target dsp_smoke && ./build/dsp_smoke

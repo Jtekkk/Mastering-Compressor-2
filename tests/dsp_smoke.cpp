@@ -344,6 +344,156 @@ int main()
         CHECK (h2c / f1c > h2 / f1, "2nd harmonic blooms with gain reduction (vari-mu bias shift)");
     }
 
+    // ------------------------------------------------- frequency response sweep --
+    {
+        mc2::EngineParams p;
+        p.thresholdDB = 0.0f; // no GR - measure the passive path on its own
+
+        std::printf ("  info : frequency response sweep (no GR, EQ out), deviation from 20 Hz:\n");
+        const double freqs[] = { 20, 50, 100, 200, 500, 1000, 2000, 5000, 10000, 15000, 20000 };
+        constexpr float inDB = -20.0f;
+        bool inBand = true;
+        for (double f : freqs)
+        {
+            auto e = makeEngine (p);
+            auto s = sine (f, inDB, 0.5);
+            run (e, s);
+            const float outDB = 20.0f * std::log10 (peakOfTail (s.l, 0.15) + 1e-12f);
+            std::printf ("    %6.0f Hz : %+.2f dB\n", f, outDB - inDB);
+            if (f >= 100.0 && f <= 10000.0)
+                inBand = inBand && std::fabs (outDB - inDB) < 1.0f;
+        }
+        CHECK (inBand, "response stays within +/-1.0 dB, 100 Hz-10 kHz, EQ out");
+    }
+
+    // ------------------------------------------------------------ THD curve --
+    {
+        mc2::EngineParams p;
+        p.thresholdDB = 0.0f; // no GR - isolate the tube stage's own colour
+
+        std::printf ("  info : THD vs input level (1 kHz, no GR):\n");
+        const float levels[] = { -24.0f, -18.0f, -12.0f, -6.0f, -3.0f };
+        float prevThd = -1.0f;
+        bool grows = true;
+        for (float lvl : levels)
+        {
+            auto e = makeEngine (p);
+            auto s = sine (1000.0, lvl, 1.5);
+            run (e, s);
+            const int start = s.size() - (int) (0.4 * kFs);
+            const int len   = (int) (0.3 * kFs);
+            const float f1 = goertzel (s.l, start, len, 1000.0);
+            const float h2 = goertzel (s.l, start, len, 2000.0);
+            const float h3 = goertzel (s.l, start, len, 3000.0);
+            const float thd = std::sqrt (h2 * h2 + h3 * h3) / std::max (1e-9f, f1) * 100.0f;
+            std::printf ("    %+5.1f dBFS : THD %.3f%%\n", lvl, thd);
+            if (prevThd >= 0.0f)
+                grows = grows && thd >= prevThd - 0.02f; // allow tiny numerical wobble
+            prevThd = thd;
+        }
+        CHECK (grows, "THD rises (or holds) as input level climbs toward 0 dBFS");
+    }
+
+    // ------------------------------------------------- attack/recovery tables --
+    {
+        auto measureAttackMs = [&] (float atkMs) {
+            auto p = base;
+            p.attackMs = atkMs;
+            auto e = makeEngine (p);
+            auto s = sine (1000.0, -6.0f, 1.5);
+            float finalGr;
+            {
+                auto e2 = makeEngine (p);
+                auto s2 = sine (1000.0, -6.0f, 3.0);
+                finalGr = grAfter (e2, s2);
+            }
+            int block = 64, t63 = -1;
+            for (int pos = 0; pos < s.size(); pos += block)
+            {
+                const int n = std::min (block, s.size() - pos);
+                float* chans[2] = { s.l.data() + pos, s.r.data() + pos };
+                e.process (chans, 2, n);
+                if (t63 < 0 && e.getGainReductionDB (0) >= 0.63f * finalGr)
+                {
+                    t63 = pos + n;
+                    break;
+                }
+            }
+            return t63 < 0 ? 1.0e9 : 1000.0 * t63 / kFs;
+        };
+
+        std::printf ("  info : attack-to-63%% GR across the full 25-70 ms range:\n");
+        double prevAtk = 0.0;
+        bool attackMonotonic = true;
+        for (float atk = 25.0f; atk <= 70.0f; atk += 5.0f)
+        {
+            const double t = measureAttackMs (atk);
+            std::printf ("    %4.0f ms setting -> %.1f ms\n", atk, t);
+            if (atk > 25.0f)
+                attackMonotonic = attackMonotonic && t > prevAtk;
+            prevAtk = t;
+        }
+        CHECK (attackMonotonic, "attack-to-63%% GR increases monotonically across all 10 detents");
+
+        auto measureReleaseS = [&] (int idx) {
+            auto p = base;
+            p.recoveryIdx = idx;
+            auto e = makeEngine (p);
+            auto burst = sine (1000.0, -6.0f, 2.0);
+            run (e, burst);
+            const float gr0 = e.getGainReductionDB (0);
+            Stereo quiet ((int) (12.0 * kFs));
+            int block = 256, t37 = -1;
+            for (int pos = 0; pos < quiet.size(); pos += block)
+            {
+                const int n = std::min (block, quiet.size() - pos);
+                float* chans[2] = { quiet.l.data() + pos, quiet.r.data() + pos };
+                e.process (chans, 2, n);
+                if (t37 < 0 && e.getGainReductionDB (0) <= 0.37f * gr0)
+                {
+                    t37 = pos + n;
+                    break;
+                }
+            }
+            return t37 < 0 ? 1.0e9 : (double) t37 / kFs;
+        };
+
+        const char* recoveryNames[5] = { "0.2 s", "0.4 s", "0.6 s", "4 s", "8 s" };
+        std::printf ("  info : recovery-to-37%% across all 5 detents:\n");
+        double prevRec = 0.0;
+        bool recoveryMonotonic = true;
+        for (int idx = 0; idx < 5; ++idx)
+        {
+            const double t = measureReleaseS (idx);
+            std::printf ("    %-5s setting -> %.2f s\n", recoveryNames[idx], t);
+            if (idx > 0)
+                recoveryMonotonic = recoveryMonotonic && t > prevRec;
+            prevRec = t;
+        }
+        CHECK (recoveryMonotonic, "recovery-to-37%% increases monotonically across all 5 detents");
+    }
+
+    // -------------------------------------------- stereo image preservation --
+    {
+        auto p = base;
+        p.stereoLink = true;
+        auto e = makeEngine (p);
+
+        // A programme panned (not hard-left) toward L: R sits 6 dB under L.
+        // A shared control voltage should compress both channels equally and
+        // leave that balance alone while it works.
+        auto s = sine (1000.0, -6.0f, 2.5);
+        for (auto& v : s.r) v *= 0.5011872336f; // -6 dB relative to L
+
+        run (e, s);
+        const float outL = 20.0f * std::log10 (peakOfTail (s.l, 0.25) + 1e-12f);
+        const float outR = 20.0f * std::log10 (peakOfTail (s.r, 0.25) + 1e-12f);
+        const float balanceDrift = std::fabs ((outL - outR) - 6.0f);
+        std::printf ("  info : panned programme (L-R input diff 6.0 dB) -> output diff %.2f dB\n",
+                     outL - outR);
+        CHECK (balanceDrift < 0.3f, "linked stereo bus keeps the mix balance within 0.3 dB");
+    }
+
     // ------------------------------------------------------------- mono --
     {
         auto e = makeEngine (base);
