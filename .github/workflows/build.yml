@@ -1,0 +1,110 @@
+name: Build
+
+# Reusable workflow: configures, builds and tests MC-2 on all three target
+# platforms, then uploads the plugin bundles as workflow artifacts. Called by
+# both ci.yml (every push/PR) and release.yml (version tags).
+on:
+  workflow_call:
+
+env:
+  BUILD_TYPE: Release
+
+jobs:
+  linux:
+    name: Linux (VST3, Standalone)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install JUCE Linux dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libasound2-dev libx11-dev libxext-dev libxinerama-dev \
+            libxrandr-dev libxcursor-dev libfreetype-dev libfontconfig1-dev
+
+      - name: Cache build tree (JUCE fetch + object files)
+        uses: actions/cache@v4
+        with:
+          path: build
+          key: linux-build-${{ hashFiles('CMakeLists.txt', 'cmake/**', 'Source/**', 'tests/**') }}
+          restore-keys: |
+            linux-build-
+
+      - name: Configure
+        run: cmake -B build -DCMAKE_BUILD_TYPE=${{ env.BUILD_TYPE }}
+
+      - name: Build
+        run: cmake --build build --config ${{ env.BUILD_TYPE }} --parallel
+
+      - name: Run DSP test suite
+        run: ctest --test-dir build --output-on-failure
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: MC2-Linux
+          path: build/MC2_artefacts/${{ env.BUILD_TYPE }}
+          if-no-files-found: error
+
+  macos:
+    name: macOS (VST3, AU, Standalone)
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Cache build tree (JUCE fetch + object files)
+        uses: actions/cache@v4
+        with:
+          path: build
+          key: macos-build-${{ hashFiles('CMakeLists.txt', 'cmake/**', 'Source/**', 'tests/**') }}
+          restore-keys: |
+            macos-build-
+
+      - name: Configure (universal binary)
+        run: |
+          cmake -B build -DCMAKE_BUILD_TYPE=${{ env.BUILD_TYPE }} \
+                -DCMAKE_OSX_ARCHITECTURES="arm64;x86_64"
+
+      - name: Build
+        run: cmake --build build --config ${{ env.BUILD_TYPE }} --parallel
+
+      - name: Run DSP test suite
+        run: ctest --test-dir build --output-on-failure
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: MC2-macOS
+          path: build/MC2_artefacts/${{ env.BUILD_TYPE }}
+          if-no-files-found: error
+
+  windows:
+    name: Windows (VST3, Standalone)
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Cache build tree (JUCE fetch + object files)
+        uses: actions/cache@v4
+        with:
+          path: build
+          key: windows-build-${{ hashFiles('CMakeLists.txt', 'cmake/**', 'Source/**', 'tests/**') }}
+          restore-keys: |
+            windows-build-
+
+      - name: Configure
+        run: cmake -B build -DCMAKE_BUILD_TYPE=${{ env.BUILD_TYPE }}
+
+      - name: Build
+        run: cmake --build build --config ${{ env.BUILD_TYPE }} --parallel
+
+      - name: Run DSP test suite
+        run: ctest --test-dir build -C ${{ env.BUILD_TYPE }} --output-on-failure
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: MC2-Windows
+          path: build/MC2_artefacts/${{ env.BUILD_TYPE }}
+          if-no-files-found: error

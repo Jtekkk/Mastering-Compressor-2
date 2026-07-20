@@ -1,5 +1,7 @@
 # MC-2 — Twin-Tube Vari-Mu Mastering Compressor
 
+[![CI](https://github.com/Jtekkk/Mastering-Compressor-2/actions/workflows/ci.yml/badge.svg)](https://github.com/Jtekkk/Mastering-Compressor-2/actions/workflows/ci.yml)
+
 A mastering-grade variable-mu (variable-gain tube) compressor/limiter plugin in the
 classic twin-tube tradition, built with [JUCE](https://juce.com). Ships as **VST3**
 (plus Standalone, and AU when built on macOS).
@@ -122,6 +124,23 @@ cmake --build build --target dsp_smoke && ./build/dsp_smoke
 Sample of what it verifies on this build: COMPRESS measures 1.52:1, LIMIT sits at
 9.5:1 mid-drive, attack-to-63 % GR is 24 ms / 60 ms at the 25/70 ms settings, and
 the 2nd harmonic rises with gain reduction exactly as a re-biased mu stage should.
+
+## Continuous integration & releases
+
+Every push and pull request runs [`.github/workflows/ci.yml`](.github/workflows/ci.yml),
+which calls the reusable [`build.yml`](.github/workflows/build.yml) workflow to
+configure, build (VST3 + Standalone everywhere, plus AU on macOS) and run
+`dsp_smoke` on native Linux, macOS (universal `arm64`/`x86_64`) and Windows
+runners. A red check means the build or the DSP suite broke on that platform.
+
+To cut a release:
+
+1. Bump `project(... VERSION x.y.z ...)` in `CMakeLists.txt`.
+2. Tag the commit `vx.y.z` and push the tag.
+
+[`release.yml`](.github/workflows/release.yml) verifies the tag matches the
+CMakeLists version, runs the same three-platform build, then packages and
+attaches a `.zip` per platform to a new GitHub Release.
 
 ## Controls
 
