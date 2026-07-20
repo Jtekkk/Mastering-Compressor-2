@@ -188,6 +188,9 @@ A few conveniences the original circuit never had:
   inverse pair), so the twin-tube engine's two channels become independent
   Mid and Side circuits instead of Left and Right - compress the centre
   and the width separately. Stereo-only; mono input ignores it.
+* **GR history graph** — a scrolling amber trace of the last ~10 s of gain
+  reduction, in its own strip below the front panel (0 dB at the top,
+  deeper reduction pulling the trace down).
 
 ## Controls
 

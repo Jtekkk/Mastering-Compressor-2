@@ -3,6 +3,7 @@
 #include <juce_audio_processors/juce_audio_processors.h>
 #include <juce_gui_basics/juce_gui_basics.h>
 
+#include "GUI/GrHistoryGraph.h"
 #include "GUI/MC2LookAndFeel.h"
 #include "GUI/VUMeter.h"
 #include "PluginProcessor.h"
@@ -37,6 +38,7 @@ private:
 
     VUMeter meterL { "LEFT" }, meterR { "RIGHT" };
     TubeWindow tubeWindow;
+    GrHistoryGraph grHistory;
 
     juce::Slider inputKnob, thresholdKnob, attackKnob, outputKnob;
     juce::Slider recoverySwitch, rectifierSwitch, scEqSwitch;

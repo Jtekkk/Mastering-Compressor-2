@@ -6,7 +6,9 @@ namespace
     constexpr int kWidth  = 1180;
     constexpr int kTopBarH = 32;   // preset browser + undo/redo strip
     constexpr int kPanelH  = 580;  // the original front-panel artwork height
-    constexpr int kHeight  = kPanelH + kTopBarH;
+    constexpr int kGraphBarH = 90; // GR history strip, below the panel
+    constexpr int kPanelBottom = kTopBarH + kPanelH; // where the vintage panel ends
+    constexpr int kHeight  = kPanelBottom + kGraphBarH;
     constexpr int kMainRowY    = 312 + kTopBarH;
     constexpr int kMainRowH    = 122;
     constexpr int kLowerRowY   = 462 + kTopBarH;
@@ -28,6 +30,7 @@ MC2AudioProcessorEditor::MC2AudioProcessorEditor (MC2AudioProcessor& p)
     addAndMakeVisible (meterL);
     addAndMakeVisible (meterR);
     addAndMakeVisible (tubeWindow);
+    addAndMakeVisible (grHistory);
 
     setupKnob (inputKnob,     ParamID::input,     13);
     setupKnob (thresholdKnob, ParamID::threshold, 17);
@@ -187,6 +190,9 @@ void MC2AudioProcessorEditor::resized()
     meterToggle.setBounds (lowerStation (4).withSizeKeepingCentre (74, 90));
     calLKnob.setBounds   (lowerStation (5));
     calRKnob.setBounds   (lowerStation (6));
+
+    // GR history strip, below the vintage panel
+    grHistory.setBounds (24, kPanelBottom + 8, kWidth - 48, kGraphBarH - 16);
 }
 
 void MC2AudioProcessorEditor::paint (juce::Graphics& g)
@@ -201,13 +207,19 @@ void MC2AudioProcessorEditor::paint (juce::Graphics& g)
 
     // panel
     g.setGradientFill (ColourGradient (mc2gui::panelTop, 0.0f, (float) kTopBarH,
-                                       mc2gui::panelBottom, 0.0f, (float) kHeight, false));
+                                       mc2gui::panelBottom, 0.0f, (float) kPanelBottom, false));
     g.fillRect (0, kTopBarH, kWidth, kPanelH);
 
     // subtle brushed texture
     g.setColour (Colours::white.withAlpha (0.018f));
-    for (int yy = kTopBarH + 8; yy < kHeight; yy += 7)
+    for (int yy = kTopBarH + 8; yy < kPanelBottom; yy += 7)
         g.drawHorizontalLine (yy, 0.0f, (float) kWidth);
+
+    // GR history strip, below the vintage panel
+    g.setColour (Colour (0xff14171c));
+    g.fillRect (0, kPanelBottom, kWidth, kGraphBarH);
+    g.setColour (mc2gui::silkDim.withAlpha (0.4f));
+    g.drawHorizontalLine (kPanelBottom, 0.0f, (float) kWidth);
 
     // header
     g.setColour (mc2gui::silk);
@@ -292,11 +304,12 @@ void MC2AudioProcessorEditor::paint (juce::Graphics& g)
                       lowerStation (7).withY (kLowerRowY + 14).withHeight (56),
                       Justification::centred, 3);
 
-    // corner screws (panel corners, not the window's - the preset bar sits above)
+    // corner screws (panel corners, not the window's - the preset bar sits
+    // above the panel and the GR history strip sits below it)
     for (auto c : { Point<float> (14.0f, 14.0f + (float) kTopBarH),
                     Point<float> ((float) kWidth - 14.0f, 14.0f + (float) kTopBarH),
-                    Point<float> (14.0f, (float) kHeight - 14.0f),
-                    Point<float> ((float) kWidth - 14.0f, (float) kHeight - 14.0f) })
+                    Point<float> (14.0f, (float) kPanelBottom - 14.0f),
+                    Point<float> ((float) kWidth - 14.0f, (float) kPanelBottom - 14.0f) })
     {
         g.setColour (Colour (0xff4a525c));
         g.fillEllipse (Rectangle<float> (10.0f, 10.0f).withCentre (c));
@@ -351,4 +364,5 @@ void MC2AudioProcessorEditor::timerCallback()
     }
 
     tubeWindow.setGlow (bypassed ? 0.15f : grSum * 0.5f / 12.0f);
+    grHistory.pushSample (grSum * 0.5f);
 }
