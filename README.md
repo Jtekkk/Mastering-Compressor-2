@@ -131,7 +131,12 @@ Every push and pull request runs [`.github/workflows/ci.yml`](.github/workflows/
 which calls the reusable [`build.yml`](.github/workflows/build.yml) workflow to
 configure, build (VST3 + Standalone everywhere, plus AU on macOS) and run
 `dsp_smoke` on native Linux, macOS (universal `arm64`/`x86_64`) and Windows
-runners. A red check means the build or the DSP suite broke on that platform.
+runners. Each platform's freshly built VST3 (and AU, on macOS) is then run
+through [pluginval](https://github.com/Tracktion/pluginval) at strictness
+level 5 — parameter automation, state save/reload and background-thread
+parameter changes are all exercised against the real binary, not just the
+DSP core. A red check means the build, the DSP suite, or host automation
+broke on that platform.
 
 To cut a release:
 
