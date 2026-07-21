@@ -346,7 +346,10 @@ void MC2AudioProcessorEditor::timerCallback()
     truePeakLabel.setText (juce::String::formatted ("TP %+.1f dBTP", proc.meterTruePeakDB.load()),
                            juce::dontSendNotification);
 
-    msToggle.setButtonText (msToggle.getToggleState() ? "M/S" : "STEREO");
+    const bool midSide = msToggle.getToggleState();
+    msToggle.setButtonText (midSide ? "M/S" : "STEREO");
+    meterL.setLabel (midSide ? "MID"  : "LEFT");
+    meterR.setLabel (midSide ? "SIDE" : "RIGHT");
 
     const bool bypassed = pBypass != nullptr && pBypass->load() >= 0.5f;
     const bool outputMode = pMeterMode != nullptr && pMeterMode->load() >= 0.5f;

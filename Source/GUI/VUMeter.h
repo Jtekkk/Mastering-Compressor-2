@@ -22,6 +22,18 @@ public:
         setInterceptsMouseClicks (false, false);
     }
 
+    // The engine's two channels carry Mid/Side instead of Left/Right when
+    // that mode is on - called from the editor so the legend never lies
+    // about which signal the needle is actually showing.
+    void setLabel (juce::String newLabel)
+    {
+        if (newLabel != side)
+        {
+            side = std::move (newLabel);
+            repaint();
+        }
+    }
+
     // Called from the editor's UI timer (~30 Hz).
     void setTarget (float vu, Mode m)
     {

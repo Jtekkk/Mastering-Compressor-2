@@ -303,6 +303,19 @@ void MC2AudioProcessor::setStateInformation (const void* data, int sizeInBytes)
     if (auto xml = getXmlFromBinary (data, sizeInBytes))
         if (xml->hasTagName (apvts.state.getType()))
             apvts.replaceState (juce::ValueTree::fromXml (*xml));
+
+    // A saved session can restore a non-default oversampling factor; if
+    // prepareToPlay already ran (the common host order: prepare, then
+    // restore state), re-sync now so the reported latency is right from
+    // the very first block instead of only catching up lazily inside the
+    // next processBlock() call.
+    if (pOversampling != nullptr && oversamplers[(size_t) activeOversamplingIdx] != nullptr)
+    {
+        const int idx = juce::jlimit (0, (int) oversamplers.size() - 1,
+                                      static_cast<int> (pOversampling->load() + 0.5f));
+        if (idx != activeOversamplingIdx)
+            applyOversamplingIndex (idx);
+    }
 }
 
 juce::AudioProcessor* JUCE_CALLTYPE createPluginFilter()

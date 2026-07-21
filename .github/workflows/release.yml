@@ -63,10 +63,14 @@ jobs:
 
       - name: Package release archives
         run: |
+          # Bare version number (no "v"), matching the Windows installer's
+          # own filename (built from CMakeLists.txt's version, not the tag)
+          # so every asset in the release uses the same naming convention.
+          VERSION="${GITHUB_REF_NAME#v}"
           mkdir -p dist
-          ( cd artifacts/Linux   && zip -r "${GITHUB_WORKSPACE}/dist/MC2-${GITHUB_REF_NAME}-Linux.zip"   . )
-          ( cd artifacts/macOS   && zip -r -y "${GITHUB_WORKSPACE}/dist/MC2-${GITHUB_REF_NAME}-macOS.zip" . )
-          ( cd artifacts/Windows && zip -r "${GITHUB_WORKSPACE}/dist/MC2-${GITHUB_REF_NAME}-Windows.zip" . )
+          ( cd artifacts/Linux   && zip -r "${GITHUB_WORKSPACE}/dist/MC2-${VERSION}-Linux.zip"   . )
+          ( cd artifacts/macOS   && zip -r -y "${GITHUB_WORKSPACE}/dist/MC2-${VERSION}-macOS.zip" . )
+          ( cd artifacts/Windows && zip -r "${GITHUB_WORKSPACE}/dist/MC2-${VERSION}-Windows.zip" . )
           cp artifacts/WindowsInstaller/*.exe dist/
 
       - name: Create GitHub Release
