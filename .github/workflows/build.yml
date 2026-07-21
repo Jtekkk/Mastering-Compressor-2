@@ -91,13 +91,24 @@ jobs:
             https://github.com/Tracktion/pluginval/releases/latest/download/pluginval_macOS.zip
           unzip -q pluginval.zip -d pluginval
 
+      - name: Install AU into the system Components folder
+        # AU discovery goes through macOS's AudioComponent registry, which is
+        # a filesystem scan of ~/Library/Audio/Plug-Ins/Components (and the
+        # system-wide folder) - pluginval can't "see" a .component sitting in
+        # the build directory, unlike VST3 which it can load directly.
+        run: |
+          mkdir -p ~/Library/Audio/Plug-Ins/Components
+          cp -R "build/MC2_artefacts/${{ env.BUILD_TYPE }}/AU/MC-2 Mastering Compressor.component" \
+            ~/Library/Audio/Plug-Ins/Components/
+          killall -9 AudioComponentRegistrar 2>/dev/null || true
+
       - name: Validate VST3 + AU host automation (pluginval)
         run: |
           PLUGINVAL="./pluginval/pluginval.app/Contents/MacOS/pluginval"
           "$PLUGINVAL" --strictness-level 5 --timeout-ms 120000 \
             --validate "build/MC2_artefacts/${{ env.BUILD_TYPE }}/VST3/MC-2 Mastering Compressor.vst3"
           "$PLUGINVAL" --strictness-level 5 --timeout-ms 120000 \
-            --validate "build/MC2_artefacts/${{ env.BUILD_TYPE }}/AU/MC-2 Mastering Compressor.component"
+            --validate ~/"Library/Audio/Plug-Ins/Components/MC-2 Mastering Compressor.component"
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
