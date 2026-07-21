@@ -306,12 +306,34 @@ void MC2AudioProcessorEditor::paint (juce::Graphics& g)
                     st.getWidth(), 10, Justification::centred);
     }
 
-    // serial plate
-    g.setColour (mc2gui::silkDim);
-    g.setFont (mc2gui::silkFont (8.0f));
-    g.drawFittedText ("SIX-RECTIFIER PALETTE\nFOUR SIDECHAIN CURVES\nNo. 00002",
-                      lowerStation (7).withY (kLowerRowY + 14).withHeight (56),
-                      Justification::centred, 3);
+    // serial plate: a distinct riveted plate screwed to the panel, not just
+    // text floating on the raw metal
+    {
+        auto plate = lowerStation (7).withY (kLowerRowY + 8).withHeight (84).reduced (10, 0);
+        auto plateF = plate.toFloat();
+
+        g.setColour (Colour (0xff1b2129));
+        g.fillRoundedRectangle (plateF, 3.0f);
+        g.setColour (Colour (0xff3a434f));
+        g.drawRoundedRectangle (plateF, 3.0f, 1.0f);
+
+        for (auto c : { plateF.getTopLeft().translated (6.0f, 6.0f),
+                        plateF.getTopRight().translated (-6.0f, 6.0f),
+                        plateF.getBottomLeft().translated (6.0f, -6.0f),
+                        plateF.getBottomRight().translated (-6.0f, -6.0f) })
+        {
+            g.setColour (Colour (0xff4a525c));
+            g.fillEllipse (Rectangle<float> (4.0f, 4.0f).withCentre (c));
+            g.setColour (Colour (0xff14181d));
+            g.fillEllipse (Rectangle<float> (1.6f, 1.6f).withCentre (c));
+        }
+
+        g.setColour (mc2gui::silkDim);
+        g.setFont (mc2gui::silkFont (8.0f));
+        g.drawFittedText ("SIX-RECTIFIER PALETTE\nFOUR SIDECHAIN CURVES\n"
+                          "NICKEL-CORE OUTPUT IRON\nNo. 00002",
+                          plate.reduced (6, 6), Justification::centred, 4);
+    }
 
     // corner screws (panel corners, not the window's - the preset bar sits
     // above the panel and the GR history strip sits below it)

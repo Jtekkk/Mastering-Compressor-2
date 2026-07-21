@@ -22,7 +22,7 @@ Every line of the hardware spec sheet and where it lives in the plugin:
 | Limit or Compress modes | `MODE` paddle. COMPRESS = gentle 1.5:1, 6 dB knee. LIMIT = feedback ratio that stiffens from 4:1 toward 20:1 as you push into it |
 | Stereo link switch | `ST LINK` paddle — sums the two control voltages like the hardware; unlinked, each channel rides its own sidechain |
 | Front-panel meter calibration | `CAL L` / `CAL R` trims, ±3 dB in 0.25 dB detents |
-| Large illuminated Sifam meters | Two vector-drawn, lamp-lit VU meters with true logarithmic dial geometry and 300 ms ballistics; switchable GR / output, 0 VU = −18 dBFS |
+| Large illuminated Sifam meters | Two vector-drawn, lamp-lit VU meters with true logarithmic dial geometry and lightly underdamped spring-mass ballistics (the needle overshoots the target a touch before settling, like the real thing); switchable GR / output, 0 VU = −18 dBFS |
 | Twin-tube design | Two cascaded triode stages per channel (input triode + 5670 mu stage), each normalised for unity gain so colour and gain stay independent |
 | Six rectifier circuits | `RECTIFIER` switch: Tube FW, Tube HW, Germanium, Silicon, Opto, RMS — each with its own detection law and ballistic scaling (`Source/DSP/Rectifiers.h`) |
 | Excellent sonic range, low noise | Whole path runs oversampled - 2× by default, selectable 1×/2×/4×/8× (linear-phase halfbands, latency reported) - double-precision filters, no added noise |
