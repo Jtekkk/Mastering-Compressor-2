@@ -1,5 +1,7 @@
 # MC-2 — Twin-Tube Vari-Mu Mastering Compressor
 
+[![CI](https://github.com/Jtekkk/Mastering-Compressor-2/actions/workflows/ci.yml/badge.svg)](https://github.com/Jtekkk/Mastering-Compressor-2/actions/workflows/ci.yml)
+
 A mastering-grade variable-mu (variable-gain tube) compressor/limiter plugin in the
 classic twin-tube tradition, built with [JUCE](https://juce.com). Ships as **VST3**
 (plus Standalone, and AU when built on macOS).
@@ -20,10 +22,10 @@ Every line of the hardware spec sheet and where it lives in the plugin:
 | Limit or Compress modes | `MODE` paddle. COMPRESS = gentle 1.5:1, 6 dB knee. LIMIT = feedback ratio that stiffens from 4:1 toward 20:1 as you push into it |
 | Stereo link switch | `ST LINK` paddle — sums the two control voltages like the hardware; unlinked, each channel rides its own sidechain |
 | Front-panel meter calibration | `CAL L` / `CAL R` trims, ±3 dB in 0.25 dB detents |
-| Large illuminated Sifam meters | Two vector-drawn, lamp-lit VU meters with true logarithmic dial geometry and 300 ms ballistics; switchable GR / output, 0 VU = −18 dBFS |
+| Large illuminated Sifam meters | Two vector-drawn, lamp-lit VU meters with true logarithmic dial geometry and lightly underdamped spring-mass ballistics (the needle overshoots the target a touch before settling, like the real thing); switchable GR / output, 0 VU = −18 dBFS |
 | Twin-tube design | Two cascaded triode stages per channel (input triode + 5670 mu stage), each normalised for unity gain so colour and gain stay independent |
 | Six rectifier circuits | `RECTIFIER` switch: Tube FW, Tube HW, Germanium, Silicon, Opto, RMS — each with its own detection law and ballistic scaling (`Source/DSP/Rectifiers.h`) |
-| Excellent sonic range, low noise | Whole path runs 2× oversampled (linear-phase halfbands, latency reported), double-precision filters, no added noise |
+| Excellent sonic range, low noise | Whole path runs oversampled - 2× by default, selectable 1×/2×/4×/8× (linear-phase halfbands, latency reported) - double-precision filters, no added noise |
 | Sidechain EQ | 4 built-in curves: FLAT, HP 100 Hz, HP 200 Hz + presence, HF lift 5 kHz |
 | Sweet passive EQ | Boost-only, broad low-Q shelves: LOW +0…6 dB @ 90 Hz, AIR +0…6 dB @ 12 kHz, with an in/out paddle |
 | All controls switches or detented knobs | Every parameter is stepped — settings are exactly repeatable |
@@ -113,7 +115,16 @@ enumeration has been exercised under Wine as well.
 
 A headless test harness measures the engine against the spec sheet — ratios,
 attack/recovery times, all six rectifiers, sidechain curves, link behaviour,
-passive EQ and tube harmonics:
+passive EQ and tube harmonics, plus:
+
+* a **frequency response sweep** (20 Hz-20 kHz, EQ out, no GR) checking the
+  passive path stays within ±1 dB from 100 Hz-10 kHz;
+* a **THD curve** across five input levels (-24…-3 dBFS) showing the tube
+  stage's distortion climb as level increases;
+* **attack/recovery tables** across all 10 attack and 5 recovery detents,
+  each asserted to be monotonically slower than the last; and
+* a **stereo image preservation** check — a programme panned 6 dB L-over-R
+  keeps that balance within 0.5 dB after linked-stereo compression.
 
 ```bash
 cmake --build build --target dsp_smoke && ./build/dsp_smoke
@@ -122,6 +133,76 @@ cmake --build build --target dsp_smoke && ./build/dsp_smoke
 Sample of what it verifies on this build: COMPRESS measures 1.52:1, LIMIT sits at
 9.5:1 mid-drive, attack-to-63 % GR is 24 ms / 60 ms at the 25/70 ms settings, and
 the 2nd harmonic rises with gain reduction exactly as a re-biased mu stage should.
+
+## Continuous integration & releases
+
+Every push and pull request runs [`.github/workflows/ci.yml`](.github/workflows/ci.yml),
+which calls the reusable [`build.yml`](.github/workflows/build.yml) workflow to
+configure, build (VST3 + Standalone everywhere, plus AU on macOS) and run
+`dsp_smoke` on native Linux, macOS (universal `arm64`/`x86_64`) and Windows
+runners. Each platform's freshly built VST3 (and AU, on macOS) is then run
+through [pluginval](https://github.com/Tracktion/pluginval) at strictness
+level 5 — parameter automation, state save/reload and background-thread
+parameter changes are all exercised against the real binary, not just the
+DSP core. A red check means the build, the DSP suite, or host automation
+broke on that platform.
+
+The Windows job also builds a proper installer: [`installer/windows/MC2.iss`](installer/windows/MC2.iss)
+(Inno Setup, preinstalled on GitHub's Windows runners) packages the VST3
+into `Common Files\VST3` and the Standalone app into `Program Files`, with
+component selection (VST3-only / Standalone-only / both) and Start
+Menu/desktop shortcuts. It's uploaded as the `MC2-Windows-Installer`
+artifact on every run - open any CI run's summary page and grab it from
+Artifacts, no tag required.
+
+To cut a release:
+
+1. Bump `project(... VERSION x.y.z ...)` in `CMakeLists.txt`.
+2. Tag the commit `vx.y.z` and push the tag.
+
+[`release.yml`](.github/workflows/release.yml) verifies the tag matches the
+CMakeLists version, runs the same three-platform build, then packages and
+attaches a `.zip` per platform plus the Windows `.exe` installer to a new
+GitHub Release.
+
+## Beyond the hardware
+
+A few conveniences the original circuit never had:
+
+* **Factory presets** — Vocal Glue, Mix Bus, Drum Bus, Master Gentle and Loud
+  Master, in the `PRESETS` dropdown top-left. They're also exposed through
+  the standard host program API, so hosts with their own preset browser see
+  them too.
+* **Undo/redo** — every parameter change goes through a `juce::UndoManager`;
+  the `UNDO`/`REDO` pair top-right walks it back and forward. Rapid knob
+  drags collapse into one step roughly every half second.
+* **LUFS-I / LUFS-S / true-peak metering** (`Source/DSP/Metering.h`) — a
+  mixing/mastering reference loudness meter, not a certified compliance
+  measurement: K-weighting via RBJ-cookbook filters shaped to the ITU-R
+  BS.1770 K-curve, the standard two-stage gated block scheme for integrated
+  loudness (400 ms blocks, 100 ms step, -70 LUFS absolute gate, -10 LU
+  relative gate), an ungated 3 s window for short-term, and a 4x Catmull-Rom
+  true-peak estimate (can register inter-sample overs a plain sample-peak
+  reading would miss). Read out top-centre in the plugin header.
+* **Oversampling selector (1x/2x/4x/8x)** — top bar, right of the LUFS
+  readout. All four factors are preallocated in `prepareToPlay`, so
+  switching between them at any time (not just between host prepare calls)
+  never allocates on the audio thread; the engine is simply re-prepared at
+  `hostRate x factor` and the new latency reported to the host. It's a
+  non-automatable, structural setting rather than a musical control - the
+  same reasoning as a sample-rate change, not a parameter you'd ride.
+* **Mid/Side processing** — the `STEREO`/`M/S` toggle top bar, left of the
+  LUFS readout. Encodes L/R to Mid/Side (`mid=(L+R)/2`, `side=(L-R)/2`)
+  before the oversampled path and decodes back afterwards (an exact
+  inverse pair), so the twin-tube engine's two channels become independent
+  Mid and Side circuits instead of Left and Right - compress the centre
+  and the width separately. Stereo-only; mono input ignores it.
+* **GR history graph** — a scrolling amber trace of the last ~10 s of gain
+  reduction, in its own strip below the front panel (0 dB at the top,
+  deeper reduction pulling the trace down).
+* **Spectrum analyzer** — a 2048-point FFT (Hann window, log frequency axis,
+  20 Hz-Nyquist) of the mono-summed output, sharing the bottom strip with
+  the GR history graph. A glance view, not a calibrated measurement.
 
 ## Controls
 

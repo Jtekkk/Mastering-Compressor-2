@@ -1,12 +1,17 @@
 #include "PluginEditor.h"
+#include "Presets.h"
 
 namespace
 {
     constexpr int kWidth  = 1180;
-    constexpr int kHeight = 580;
-    constexpr int kMainRowY    = 312;
+    constexpr int kTopBarH = 32;   // preset browser + undo/redo strip
+    constexpr int kPanelH  = 580;  // the original front-panel artwork height
+    constexpr int kGraphBarH = 90; // GR history strip, below the panel
+    constexpr int kPanelBottom = kTopBarH + kPanelH; // where the vintage panel ends
+    constexpr int kHeight  = kPanelBottom + kGraphBarH;
+    constexpr int kMainRowY    = 312 + kTopBarH;
     constexpr int kMainRowH    = 122;
-    constexpr int kLowerRowY   = 462;
+    constexpr int kLowerRowY   = 462 + kTopBarH;
     constexpr int kLowerRowH   = 100;
 
     constexpr float kPi = juce::MathConstants<float>::pi;
@@ -25,6 +30,9 @@ MC2AudioProcessorEditor::MC2AudioProcessorEditor (MC2AudioProcessor& p)
     addAndMakeVisible (meterL);
     addAndMakeVisible (meterR);
     addAndMakeVisible (tubeWindow);
+    addAndMakeVisible (grHistory);
+    addAndMakeVisible (spectrum);
+    spectrum.setSampleRate (proc.getSampleRate());
 
     setupKnob (inputKnob,     ParamID::input,     13);
     setupKnob (thresholdKnob, ParamID::threshold, 17);
@@ -50,6 +58,44 @@ MC2AudioProcessorEditor::MC2AudioProcessorEditor (MC2AudioProcessor& p)
     pCalL      = proc.apvts.getRawParameterValue (ParamID::calL);
     pCalR      = proc.apvts.getRawParameterValue (ParamID::calR);
     pBypass    = proc.apvts.getRawParameterValue (ParamID::bypass);
+
+    addAndMakeVisible (presetBox);
+    presetBox.setTextWhenNothingSelected ("PRESETS");
+    presetBox.addItem ("Default", 1);
+    {
+        int itemId = 2;
+        for (auto& preset : mc2presets::factoryPresets())
+            presetBox.addItem (preset.name, itemId++);
+    }
+    presetBox.setSelectedId (proc.getCurrentProgram() + 1, juce::dontSendNotification);
+    presetBox.onChange = [this]
+    {
+        const int id = presetBox.getSelectedId();
+        if (id > 0)
+            proc.setCurrentProgram (id - 1);
+    };
+
+    addAndMakeVisible (undoButton);
+    addAndMakeVisible (redoButton);
+    undoButton.onClick = [this] { proc.undoManager.undo(); };
+    redoButton.onClick = [this] { proc.undoManager.redo(); };
+
+    for (auto* label : { &lufsILabel, &lufsSLabel, &truePeakLabel })
+    {
+        label->setJustificationType (juce::Justification::centred);
+        addAndMakeVisible (*label);
+    }
+
+    addAndMakeVisible (oversamplingBox);
+    oversamplingBox.addItemList (ParamText::oversamplingChoices, 1);
+    oversamplingBox.setTooltip ("Oversampling factor");
+    oversamplingAttachment = std::make_unique<ComboBoxAttachment> (
+        proc.apvts, ParamID::oversampling, oversamplingBox);
+
+    addAndMakeVisible (msToggle);
+    msToggle.setClickingTogglesState (true);
+    msToggle.setTooltip ("Process Mid/Side instead of Left/Right");
+    buttonAttachments.push_back (std::make_unique<ButtonAttachment> (proc.apvts, ParamID::msMode, msToggle));
 
     startTimerHz (30);
     setSize (kWidth, kHeight);
@@ -110,12 +156,25 @@ juce::Rectangle<int> MC2AudioProcessorEditor::lowerStation (int index) const
 
 void MC2AudioProcessorEditor::resized()
 {
-    meterL.setBounds (24, 46, 350, 244);
-    meterR.setBounds (kWidth - 24 - 350, 46, 350, 244);
-    tubeWindow.setBounds (462, 56, 256, 122);
+    // preset browser + undo/redo strip, fixed to the top of the window
+    presetBox.setBounds (16, (kTopBarH - 22) / 2, 220, 22);
+    msToggle.setBounds (260, (kTopBarH - 22) / 2, 100, 22);
+    redoButton.setBounds (kWidth - 16 - 64, (kTopBarH - 22) / 2, 64, 22);
+    undoButton.setBounds (redoButton.getX() - 6 - 64, (kTopBarH - 22) / 2, 64, 22);
+
+    // LUFS-I / LUFS-S / true-peak readout, centred between the preset
+    // browser and the undo/redo pair
+    lufsILabel.setBounds    (420, (kTopBarH - 22) / 2, 130, 22);
+    lufsSLabel.setBounds    (560, (kTopBarH - 22) / 2, 130, 22);
+    truePeakLabel.setBounds (700, (kTopBarH - 22) / 2, 130, 22);
+    oversamplingBox.setBounds (860, (kTopBarH - 22) / 2, 130, 22);
+
+    meterL.setBounds (24, 46 + kTopBarH, 350, 244);
+    meterR.setBounds (kWidth - 24 - 350, 46 + kTopBarH, 350, 244);
+    tubeWindow.setBounds (462, 56 + kTopBarH, 256, 122);
 
     // bypass paddle under the tube window
-    bypassToggle.setBounds (kWidth / 2 - 36, 208, 72, 82);
+    bypassToggle.setBounds (kWidth / 2 - 36, 208 + kTopBarH, 72, 82);
 
     inputKnob.setBounds     (mainStation (0));
     thresholdKnob.setBounds (mainStation (1));
@@ -133,50 +192,72 @@ void MC2AudioProcessorEditor::resized()
     meterToggle.setBounds (lowerStation (4).withSizeKeepingCentre (74, 90));
     calLKnob.setBounds   (lowerStation (5));
     calRKnob.setBounds   (lowerStation (6));
+
+    // GR history + spectrum strip, below the vintage panel, split in half
+    {
+        const int y = kPanelBottom + 8;
+        const int h = kGraphBarH - 16;
+        const int gap = 8;
+        const int halfW = (kWidth - 48 - gap) / 2;
+        grHistory.setBounds (24, y, halfW, h);
+        spectrum.setBounds (24 + halfW + gap, y, halfW, h);
+    }
 }
 
 void MC2AudioProcessorEditor::paint (juce::Graphics& g)
 {
     using namespace juce;
 
+    // preset / undo bar, fixed to the very top of the window
+    g.setColour (Colour (0xff14171c));
+    g.fillRect (0, 0, kWidth, kTopBarH);
+    g.setColour (mc2gui::silkDim.withAlpha (0.4f));
+    g.drawHorizontalLine (kTopBarH - 1, 0.0f, (float) kWidth);
+
     // panel
-    g.setGradientFill (ColourGradient (mc2gui::panelTop, 0.0f, 0.0f,
-                                       mc2gui::panelBottom, 0.0f, (float) kHeight, false));
-    g.fillAll();
+    g.setGradientFill (ColourGradient (mc2gui::panelTop, 0.0f, (float) kTopBarH,
+                                       mc2gui::panelBottom, 0.0f, (float) kPanelBottom, false));
+    g.fillRect (0, kTopBarH, kWidth, kPanelH);
 
     // subtle brushed texture
     g.setColour (Colours::white.withAlpha (0.018f));
-    for (int yy = 8; yy < kHeight; yy += 7)
+    for (int yy = kTopBarH + 8; yy < kPanelBottom; yy += 7)
         g.drawHorizontalLine (yy, 0.0f, (float) kWidth);
+
+    // GR history strip, below the vintage panel
+    g.setColour (Colour (0xff14171c));
+    g.fillRect (0, kPanelBottom, kWidth, kGraphBarH);
+    g.setColour (mc2gui::silkDim.withAlpha (0.4f));
+    g.drawHorizontalLine (kPanelBottom, 0.0f, (float) kWidth);
 
     // header
     g.setColour (mc2gui::silk);
     g.setFont (mc2gui::silkFont (16.0f));
-    g.drawText ("JTEKK AUDIO", 26, 8, 220, 22, Justification::centredLeft);
+    g.drawText ("JTEKK AUDIO", 26, 8 + kTopBarH, 220, 22, Justification::centredLeft);
 
     g.setFont (mc2gui::silkFont (13.0f));
     g.drawText ("MC-2   TWIN-TUBE VARI-MU MASTERING COMPRESSOR",
-                0, 10, kWidth, 18, Justification::centred);
+                0, 10 + kTopBarH, kWidth, 18, Justification::centred);
 
     g.setColour (mc2gui::silkDim);
     g.setFont (mc2gui::silkFont (9.0f));
     g.drawText (String::fromUTF8 ("BALANCED I/O   \xc2\xb7   120 V B+   \xc2\xb7   ALL-TUBE CLASS A"),
-                kWidth - 360 - 26, 12, 360, 14, Justification::centredRight);
+                kWidth - 360 - 26, 12 + kTopBarH, 360, 14, Justification::centredRight);
 
     g.setColour (mc2gui::silkDim.withAlpha (0.5f));
-    g.drawHorizontalLine (38, 20.0f, (float) kWidth - 20.0f);
+    g.drawHorizontalLine (38 + kTopBarH, 20.0f, (float) kWidth - 20.0f);
 
     // centre block captions
     g.setColour (mc2gui::silkDim);
     g.setFont (mc2gui::silkFont (8.5f));
-    g.drawText ("VARIABLE-GAIN TWIN TRIODES", 462, 182, 256, 11, Justification::centred);
+    g.drawText ("VARIABLE-GAIN TWIN TRIODES", 462, 182 + kTopBarH, 256, 11, Justification::centred);
     g.setColour (mc2gui::silk);
     g.setFont (mc2gui::silkFont (10.0f));
-    g.drawText ("HARD-WIRE", kWidth / 2 - 70, 197, 140, 11, Justification::centred);
+    g.drawText ("HARD-WIRE", kWidth / 2 - 70, 197 + kTopBarH, 140, 11, Justification::centred);
 
     // power jewel
     {
-        const Point<float> lamp (438.0f, 244.0f);
+        const Point<float> lamp (438.0f, 244.0f + (float) kTopBarH);
         ColourGradient gl (mc2gui::accentRed.brighter (0.6f), lamp.x, lamp.y,
                            mc2gui::accentRed.withAlpha (0.0f), lamp.x + 16.0f, lamp.y + 16.0f, true);
         gl.isRadial = true;
@@ -225,17 +306,41 @@ void MC2AudioProcessorEditor::paint (juce::Graphics& g)
                     st.getWidth(), 10, Justification::centred);
     }
 
-    // serial plate
-    g.setColour (mc2gui::silkDim);
-    g.setFont (mc2gui::silkFont (8.0f));
-    g.drawFittedText ("SIX-RECTIFIER PALETTE\nFOUR SIDECHAIN CURVES\nNo. 00002",
-                      lowerStation (7).withY (kLowerRowY + 14).withHeight (56),
-                      Justification::centred, 3);
+    // serial plate: a distinct riveted plate screwed to the panel, not just
+    // text floating on the raw metal
+    {
+        auto plate = lowerStation (7).withY (kLowerRowY + 8).withHeight (84).reduced (10, 0);
+        auto plateF = plate.toFloat();
 
-    // corner screws
-    for (auto c : { Point<float> (14.0f, 14.0f), Point<float> ((float) kWidth - 14.0f, 14.0f),
-                    Point<float> (14.0f, (float) kHeight - 14.0f),
-                    Point<float> ((float) kWidth - 14.0f, (float) kHeight - 14.0f) })
+        g.setColour (Colour (0xff1b2129));
+        g.fillRoundedRectangle (plateF, 3.0f);
+        g.setColour (Colour (0xff3a434f));
+        g.drawRoundedRectangle (plateF, 3.0f, 1.0f);
+
+        for (auto c : { plateF.getTopLeft().translated (6.0f, 6.0f),
+                        plateF.getTopRight().translated (-6.0f, 6.0f),
+                        plateF.getBottomLeft().translated (6.0f, -6.0f),
+                        plateF.getBottomRight().translated (-6.0f, -6.0f) })
+        {
+            g.setColour (Colour (0xff4a525c));
+            g.fillEllipse (Rectangle<float> (4.0f, 4.0f).withCentre (c));
+            g.setColour (Colour (0xff14181d));
+            g.fillEllipse (Rectangle<float> (1.6f, 1.6f).withCentre (c));
+        }
+
+        g.setColour (mc2gui::silkDim);
+        g.setFont (mc2gui::silkFont (8.0f));
+        g.drawFittedText ("SIX-RECTIFIER PALETTE\nFOUR SIDECHAIN CURVES\n"
+                          "NICKEL-CORE OUTPUT IRON\nNo. 00002",
+                          plate.reduced (6, 6), Justification::centred, 4);
+    }
+
+    // corner screws (panel corners, not the window's - the preset bar sits
+    // above the panel and the GR history strip sits below it)
+    for (auto c : { Point<float> (14.0f, 14.0f + (float) kTopBarH),
+                    Point<float> ((float) kWidth - 14.0f, 14.0f + (float) kTopBarH),
+                    Point<float> (14.0f, (float) kPanelBottom - 14.0f),
+                    Point<float> ((float) kWidth - 14.0f, (float) kPanelBottom - 14.0f) })
     {
         g.setColour (Colour (0xff4a525c));
         g.fillEllipse (Rectangle<float> (10.0f, 10.0f).withCentre (c));
@@ -246,6 +351,28 @@ void MC2AudioProcessorEditor::paint (juce::Graphics& g)
 
 void MC2AudioProcessorEditor::timerCallback()
 {
+    // Collapse rapid knob-drag changes into one undo step roughly every
+    // half second, rather than one step per audio-thread parameter tick.
+    if (--undoTransactionCountdown <= 0)
+    {
+        undoTransactionCountdown = 15; // 15 ticks @ 30 Hz = 0.5 s
+        proc.undoManager.beginNewTransaction();
+    }
+    undoButton.setEnabled (proc.undoManager.canUndo());
+    redoButton.setEnabled (proc.undoManager.canRedo());
+
+    lufsILabel.setText (juce::String::formatted ("LUFS-I %.1f", proc.meterLufsI.load()),
+                        juce::dontSendNotification);
+    lufsSLabel.setText (juce::String::formatted ("LUFS-S %.1f", proc.meterLufsS.load()),
+                        juce::dontSendNotification);
+    truePeakLabel.setText (juce::String::formatted ("TP %+.1f dBTP", proc.meterTruePeakDB.load()),
+                           juce::dontSendNotification);
+
+    const bool midSide = msToggle.getToggleState();
+    msToggle.setButtonText (midSide ? "M/S" : "STEREO");
+    meterL.setLabel (midSide ? "MID"  : "LEFT");
+    meterR.setLabel (midSide ? "SIDE" : "RIGHT");
+
     const bool bypassed = pBypass != nullptr && pBypass->load() >= 0.5f;
     const bool outputMode = pMeterMode != nullptr && pMeterMode->load() >= 0.5f;
     const float cal[2] = { pCalL != nullptr ? pCalL->load() : 0.0f,
@@ -271,4 +398,8 @@ void MC2AudioProcessorEditor::timerCallback()
     }
 
     tubeWindow.setGlow (bypassed ? 0.15f : grSum * 0.5f / 12.0f);
+    grHistory.pushSample (grSum * 0.5f);
+
+    spectrum.setSampleRate (proc.getSampleRate());
+    spectrum.update (proc.scopeBuffer, proc.scopeWritePos.load (std::memory_order_relaxed));
 }

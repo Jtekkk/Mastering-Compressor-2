@@ -3,7 +3,10 @@
 #include <juce_audio_processors/juce_audio_processors.h>
 #include <juce_dsp/juce_dsp.h>
 
+#include <array>
+
 #include "DSP/MC2Engine.h"
+#include "DSP/Metering.h"
 #include "Params.h"
 
 class MC2AudioProcessor : public juce::AudioProcessor
@@ -26,10 +29,10 @@ public:
     bool isMidiEffect() const override                    { return false; }
     double getTailLengthSeconds() const override          { return 0.0; }
 
-    int getNumPrograms() override                         { return 1; }
-    int getCurrentProgram() override                      { return 0; }
-    void setCurrentProgram (int) override                 {}
-    const juce::String getProgramName (int) override      { return {}; }
+    int getNumPrograms() override;
+    int getCurrentProgram() override                      { return currentProgramIndex; }
+    void setCurrentProgram (int index) override;
+    const juce::String getProgramName (int index) override;
     void changeProgramName (int, const juce::String&) override {}
 
     void getStateInformation (juce::MemoryBlock& destData) override;
@@ -37,17 +40,44 @@ public:
 
     juce::AudioProcessorParameter* getBypassParameter() const override { return bypassParam; }
 
+    // Declared before apvts: JUCE constructs members in declaration order, and
+    // the APVTS needs the manager to already exist to wire undo/redo through it.
+    juce::UndoManager undoManager;
     juce::AudioProcessorValueTreeState apvts;
 
     // Meter feed for the editor (lock-free).
     std::atomic<float> meterGrDB[2]  { 0.0f, 0.0f };
     std::atomic<float> meterOutRms[2] { 0.0f, 0.0f };
+    std::atomic<float> meterLufsI      { -70.0f };
+    std::atomic<float> meterLufsS      { -70.0f };
+    std::atomic<float> meterTruePeakDB { -100.0f };
+
+    // Mono (post-processing) scope feed for the spectrum analyzer: a plain
+    // circular buffer, only the write position is atomic. This is a display
+    // only - a torn read under a concurrent audio-thread write costs the
+    // analyzer a stale sample for one frame at worst, never a crash, so a
+    // lock or full SPSC fifo would be needless ceremony here.
+    static constexpr int kScopeSize = 2048; // must match SpectrumAnalyzer::kFftSize
+    std::array<float, (size_t) kScopeSize> scopeBuffer {};
+    std::atomic<int> scopeWritePos { 0 };
 
 private:
     void updateEngineParams();
+    void updateMeters (const juce::AudioBuffer<float>& buffer, int numCh, int n);
+    void applyOversamplingIndex (int idx);
 
     mc2::MC2Engine engine;
-    std::unique_ptr<juce::dsp::Oversampling<float>> oversampler;
+    mc2::LoudnessMeter loudnessMeter;
+
+    // All 4 factors (1x/2x/4x/8x) are preallocated in prepareToPlay so that
+    // switching between them at runtime - which the OVERSAMPLING control
+    // allows at any time, not just between host prepareToPlay calls - never
+    // allocates on the audio thread; it's just a change of which index is
+    // active plus a (allocation-free) MC2Engine::prepare() at the new rate.
+    std::array<std::unique_ptr<juce::dsp::Oversampling<float>>, 4> oversamplers;
+    int activeOversamplingIdx = 1; // 2x, matching the parameter's default
+    double hostSampleRate = 44100.0;
+    int hostBlockSize = 512;
 
     // Cached raw parameter pointers (atomics owned by the APVTS).
     std::atomic<float>* pInput     = nullptr;
@@ -62,7 +92,10 @@ private:
     std::atomic<float>* pEqIn      = nullptr;
     std::atomic<float>* pEqLow     = nullptr;
     std::atomic<float>* pEqAir     = nullptr;
+    std::atomic<float>* pOversampling = nullptr;
+    std::atomic<float>* pMsMode    = nullptr;
     juce::AudioParameterBool* bypassParam = nullptr;
+    int currentProgramIndex = 0;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (MC2AudioProcessor)
 };

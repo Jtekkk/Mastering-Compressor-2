@@ -25,6 +25,8 @@ namespace ParamID
     inline constexpr const char* meterMode = "meter_mode";
     inline constexpr const char* calL      = "cal_l";
     inline constexpr const char* calR      = "cal_r";
+    inline constexpr const char* oversampling = "oversampling";
+    inline constexpr const char* msMode    = "ms_mode";
 }
 
 namespace ParamText
@@ -35,6 +37,7 @@ namespace ParamText
                                                    "SILICON", "OPTO", "RMS" };
     inline const juce::StringArray scCurves      { "FLAT", "HP 100", "HP200+PRES", "HF LIFT" };
     inline const juce::StringArray meterModes    { "GR", "OUTPUT" };
+    inline const juce::StringArray oversamplingChoices { "1x", "2x", "4x", "8x" };
 }
 
 inline juce::AudioProcessorValueTreeState::ParameterLayout createParameterLayout()
@@ -116,6 +119,15 @@ inline juce::AudioProcessorValueTreeState::ParameterLayout createParameterLayout
         ParameterID { ParamID::calR, 1 }, "Meter Cal R",
         NormalisableRange<float> (-3.0f, 3.0f, 0.25f), 0.0f,
         AudioParameterFloatAttributes().withStringFromValueFunction (dbText)));
+
+    // Structural, not a musical control: changing it re-prepares the engine
+    // at a new internal rate, so it's excluded from host automation lanes.
+    layout.add (std::make_unique<ChoiceParam> (
+        ParameterID { ParamID::oversampling, 1 }, "Oversampling", ParamText::oversamplingChoices, 1,
+        AudioParameterChoiceAttributes().withAutomatable (false)));
+
+    layout.add (std::make_unique<BoolParam> (
+        ParameterID { ParamID::msMode, 1 }, "Mid/Side", false));
 
     return layout;
 }

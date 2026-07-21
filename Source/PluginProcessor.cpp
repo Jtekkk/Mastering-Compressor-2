@@ -1,11 +1,49 @@
 #include "PluginProcessor.h"
 #include "PluginEditor.h"
+#include "Presets.h"
+
+namespace
+{
+// Exact inverse pair (mid=(L+R)/2, side=(L-R)/2 <-> L=mid+side, R=mid-side):
+// applied around the whole oversampled path so the engine's two channels
+// carry Mid/Side instead of Left/Right when the mode is on.
+void encodeMidSide (juce::AudioBuffer<float>& buffer, int numCh, int n)
+{
+    if (numCh != 2)
+        return;
+
+    float* l = buffer.getWritePointer (0);
+    float* r = buffer.getWritePointer (1);
+    for (int i = 0; i < n; ++i)
+    {
+        const float mid  = 0.5f * (l[i] + r[i]);
+        const float side = 0.5f * (l[i] - r[i]);
+        l[i] = mid;
+        r[i] = side;
+    }
+}
+
+void decodeMidSide (juce::AudioBuffer<float>& buffer, int numCh, int n)
+{
+    if (numCh != 2)
+        return;
+
+    float* m = buffer.getWritePointer (0);
+    float* s = buffer.getWritePointer (1);
+    for (int i = 0; i < n; ++i)
+    {
+        const float mid = m[i], side = s[i];
+        m[i] = mid + side;
+        s[i] = mid - side;
+    }
+}
+} // namespace
 
 MC2AudioProcessor::MC2AudioProcessor()
     : AudioProcessor (BusesProperties()
                           .withInput ("Input", juce::AudioChannelSet::stereo(), true)
                           .withOutput ("Output", juce::AudioChannelSet::stereo(), true)),
-      apvts (*this, nullptr, "MC2", createParameterLayout())
+      apvts (*this, &undoManager, "MC2", createParameterLayout())
 {
     pInput     = apvts.getRawParameterValue (ParamID::input);
     pThreshold = apvts.getRawParameterValue (ParamID::threshold);
@@ -19,8 +57,45 @@ MC2AudioProcessor::MC2AudioProcessor()
     pEqIn      = apvts.getRawParameterValue (ParamID::eqIn);
     pEqLow     = apvts.getRawParameterValue (ParamID::eqLow);
     pEqAir     = apvts.getRawParameterValue (ParamID::eqAir);
+    pOversampling = apvts.getRawParameterValue (ParamID::oversampling);
+    pMsMode    = apvts.getRawParameterValue (ParamID::msMode);
 
     bypassParam = dynamic_cast<juce::AudioParameterBool*> (apvts.getParameter (ParamID::bypass));
+}
+
+int MC2AudioProcessor::getNumPrograms()
+{
+    // Program 0 is "Default" (whatever the current knob settings are);
+    // programs 1..N are the factory presets below it.
+    return 1 + (int) mc2presets::factoryPresets().size();
+}
+
+const juce::String MC2AudioProcessor::getProgramName (int index)
+{
+    if (index <= 0)
+        return "Default";
+
+    const auto& presets = mc2presets::factoryPresets();
+    if (index - 1 < (int) presets.size())
+        return presets[(size_t) (index - 1)].name;
+
+    return {};
+}
+
+void MC2AudioProcessor::setCurrentProgram (int index)
+{
+    const auto& presets = mc2presets::factoryPresets();
+    if (index < 0 || index > (int) presets.size())
+        return;
+
+    currentProgramIndex = index;
+
+    if (index == 0)
+        return; // "Default" leaves whatever is currently dialled in alone
+
+    const auto& preset = presets[(size_t) (index - 1)];
+    undoManager.beginNewTransaction ("Load preset: " + juce::String (preset.name));
+    mc2presets::apply (apvts, preset);
 }
 
 bool MC2AudioProcessor::isBusesLayoutSupported (const BusesLayout& layouts) const
@@ -39,26 +114,56 @@ void MC2AudioProcessor::prepareToPlay (double sampleRate, int samplesPerBlock)
 {
     const auto numCh = static_cast<size_t> (juce::jmax (1, getTotalNumOutputChannels()));
 
-    // The whole signal path runs 2x oversampled: the tube curvature stays
-    // alias-free and the detector resolution doubles. Linear-phase FIR
-    // halfbands, latency reported to the host.
-    oversampler = std::make_unique<juce::dsp::Oversampling<float>> (
-        numCh, 1,
-        juce::dsp::Oversampling<float>::filterHalfBandFIREquiripple,
-        true, false);
-    oversampler->initProcessing (static_cast<size_t> (samplesPerBlock));
+    hostSampleRate = sampleRate;
+    hostBlockSize  = samplesPerBlock;
 
-    engine.prepare (sampleRate * 2.0, samplesPerBlock * 2);
-    updateEngineParams();
+    // All 4 factors (1x/2x/4x/8x) are preallocated up front: the OVERSAMPLING
+    // control can switch between them at any time, not just between host
+    // prepareToPlay calls, and preallocating keeps that switch allocation-free
+    // (see applyOversamplingIndex()). Linear-phase FIR halfbands throughout;
+    // latency is reported to the host whenever the active factor changes.
+    for (int i = 0; i < (int) oversamplers.size(); ++i)
+    {
+        oversamplers[(size_t) i] = std::make_unique<juce::dsp::Oversampling<float>> (
+            numCh, (size_t) i,
+            juce::dsp::Oversampling<float>::filterHalfBandFIREquiripple,
+            true, false);
+        oversamplers[(size_t) i]->initProcessing (static_cast<size_t> (samplesPerBlock));
+    }
 
-    setLatencySamples (juce::roundToInt (oversampler->getLatencyInSamples()));
+    // Loudness/true-peak metering runs on the real output rate, not the
+    // engine's internal oversampled rate.
+    loudnessMeter.prepare (sampleRate, (int) numCh);
+
+    const int idx = pOversampling != nullptr
+                       ? juce::jlimit (0, (int) oversamplers.size() - 1,
+                                       static_cast<int> (pOversampling->load() + 0.5f))
+                       : activeOversamplingIdx;
+    applyOversamplingIndex (idx);
 }
 
 void MC2AudioProcessor::releaseResources()
 {
-    if (oversampler != nullptr)
-        oversampler->reset();
+    for (auto& ovs : oversamplers)
+        if (ovs != nullptr)
+            ovs->reset();
     engine.reset();
+    loudnessMeter.reset();
+}
+
+void MC2AudioProcessor::applyOversamplingIndex (int idx)
+{
+    activeOversamplingIdx = idx;
+    const int factor = 1 << idx; // 1, 2, 4, 8
+
+    // MC2Engine::prepare() never allocates (fixed-size channel state), so
+    // this is safe to call here even when idx changed mid-stream, from
+    // inside processBlock.
+    engine.prepare (hostSampleRate * factor, hostBlockSize * factor);
+    updateEngineParams();
+
+    setLatencySamples (juce::roundToInt (
+        oversamplers[(size_t) activeOversamplingIdx]->getLatencyInSamples()));
 }
 
 void MC2AudioProcessor::updateEngineParams()
@@ -89,8 +194,18 @@ void MC2AudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::Mi
     for (int c = numCh; c < buffer.getNumChannels(); ++c)
         buffer.clear (c, 0, n);
 
-    if (n == 0 || numCh == 0 || oversampler == nullptr)
+    if (n == 0 || numCh == 0 || oversamplers[(size_t) activeOversamplingIdx] == nullptr)
         return;
+
+    if (pOversampling != nullptr)
+    {
+        const int desiredIdx = juce::jlimit (0, (int) oversamplers.size() - 1,
+                                             static_cast<int> (pOversampling->load() + 0.5f));
+        if (desiredIdx != activeOversamplingIdx)
+            applyOversamplingIndex (desiredIdx);
+    }
+
+    auto& ovs = *oversamplers[(size_t) activeOversamplingIdx];
 
     const bool bypassed = bypassParam != nullptr && bypassParam->get();
 
@@ -102,9 +217,9 @@ void MC2AudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::Mi
         juce::dsp::AudioBlock<float> block (buffer.getArrayOfWritePointers(),
                                             static_cast<size_t> (numCh),
                                             static_cast<size_t> (n));
-        auto up = oversampler->processSamplesUp (block);
+        auto up = ovs.processSamplesUp (block);
         juce::ignoreUnused (up);
-        oversampler->processSamplesDown (block);
+        ovs.processSamplesDown (block);
 
         for (int c = 0; c < 2; ++c)
         {
@@ -112,15 +227,20 @@ void MC2AudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::Mi
             meterGrDB[c].store (0.0f);
             meterOutRms[c].store (buffer.getRMSLevel (src, 0, n));
         }
+        updateMeters (buffer, numCh, n);
         return;
     }
 
     updateEngineParams();
 
+    const bool midSide = numCh == 2 && pMsMode != nullptr && pMsMode->load() >= 0.5f;
+    if (midSide)
+        encodeMidSide (buffer, numCh, n);
+
     juce::dsp::AudioBlock<float> block (buffer.getArrayOfWritePointers(),
                                         static_cast<size_t> (numCh),
                                         static_cast<size_t> (n));
-    auto up = oversampler->processSamplesUp (block);
+    auto up = ovs.processSamplesUp (block);
 
     float* chans[2] = { nullptr, nullptr };
     for (int c = 0; c < numCh; ++c)
@@ -128,7 +248,10 @@ void MC2AudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::Mi
 
     engine.process (chans, numCh, static_cast<int> (up.getNumSamples()));
 
-    oversampler->processSamplesDown (block);
+    ovs.processSamplesDown (block);
+
+    if (midSide)
+        decodeMidSide (buffer, numCh, n);
 
     for (int c = 0; c < 2; ++c)
     {
@@ -136,6 +259,32 @@ void MC2AudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::Mi
         meterGrDB[c].store (engine.getGainReductionDB (src));
         meterOutRms[c].store (engine.getOutputRms (src));
     }
+    updateMeters (buffer, numCh, n);
+}
+
+void MC2AudioProcessor::updateMeters (const juce::AudioBuffer<float>& buffer, int numCh, int n)
+{
+    const float* chans[2] = { nullptr, nullptr };
+    for (int c = 0; c < numCh; ++c)
+        chans[c] = buffer.getReadPointer (c);
+
+    loudnessMeter.process (chans, numCh, n);
+    meterLufsI.store (loudnessMeter.getIntegratedLUFS());
+    meterLufsS.store (loudnessMeter.getShortTermLUFS());
+    meterTruePeakDB.store (loudnessMeter.getTruePeakDB());
+
+    int pos = scopeWritePos.load (std::memory_order_relaxed);
+    for (int i = 0; i < n; ++i)
+    {
+        float mono = 0.0f;
+        for (int c = 0; c < numCh; ++c)
+            mono += chans[c][i];
+        mono /= (float) numCh;
+
+        scopeBuffer[(size_t) pos] = mono;
+        pos = (pos + 1) % kScopeSize;
+    }
+    scopeWritePos.store (pos, std::memory_order_relaxed);
 }
 
 juce::AudioProcessorEditor* MC2AudioProcessor::createEditor()
@@ -154,6 +303,19 @@ void MC2AudioProcessor::setStateInformation (const void* data, int sizeInBytes)
     if (auto xml = getXmlFromBinary (data, sizeInBytes))
         if (xml->hasTagName (apvts.state.getType()))
             apvts.replaceState (juce::ValueTree::fromXml (*xml));
+
+    // A saved session can restore a non-default oversampling factor; if
+    // prepareToPlay already ran (the common host order: prepare, then
+    // restore state), re-sync now so the reported latency is right from
+    // the very first block instead of only catching up lazily inside the
+    // next processBlock() call.
+    if (pOversampling != nullptr && oversamplers[(size_t) activeOversamplingIdx] != nullptr)
+    {
+        const int idx = juce::jlimit (0, (int) oversamplers.size() - 1,
+                                      static_cast<int> (pOversampling->load() + 0.5f));
+        if (idx != activeOversamplingIdx)
+            applyOversamplingIndex (idx);
+    }
 }
 
 juce::AudioProcessor* JUCE_CALLTYPE createPluginFilter()

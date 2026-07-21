@@ -3,6 +3,7 @@
 // printed on the front panel actually holds.
 
 #include "DSP/MC2Engine.h"
+#include "DSP/Metering.h"
 
 #include <cmath>
 #include <cstdio>
@@ -344,6 +345,211 @@ int main()
         CHECK (h2c / f1c > h2 / f1, "2nd harmonic blooms with gain reduction (vari-mu bias shift)");
     }
 
+    // ------------------------------------------------- frequency response sweep --
+    {
+        mc2::EngineParams p;
+        p.thresholdDB = 0.0f; // no GR - measure the passive path on its own
+
+        std::printf ("  info : frequency response sweep (no GR, EQ out), deviation from 20 Hz:\n");
+        const double freqs[] = { 20, 50, 100, 200, 500, 1000, 2000, 5000, 10000, 15000, 20000 };
+        constexpr float inDB = -20.0f;
+        bool inBand = true;
+        for (double f : freqs)
+        {
+            auto e = makeEngine (p);
+            auto s = sine (f, inDB, 0.5);
+            run (e, s);
+            const float outDB = 20.0f * std::log10 (peakOfTail (s.l, 0.15) + 1e-12f);
+            std::printf ("    %6.0f Hz : %+.2f dB\n", f, outDB - inDB);
+            if (f >= 100.0 && f <= 10000.0)
+                inBand = inBand && std::fabs (outDB - inDB) < 1.0f;
+        }
+        CHECK (inBand, "response stays within +/-1.0 dB, 100 Hz-10 kHz, EQ out");
+    }
+
+    // ------------------------------------------------------------ THD curve --
+    {
+        mc2::EngineParams p;
+        p.thresholdDB = 0.0f; // no GR - isolate the tube stage's own colour
+
+        std::printf ("  info : THD vs input level (1 kHz, no GR):\n");
+        const float levels[] = { -24.0f, -18.0f, -12.0f, -6.0f, -3.0f };
+        float prevThd = -1.0f;
+        bool grows = true;
+        for (float lvl : levels)
+        {
+            auto e = makeEngine (p);
+            auto s = sine (1000.0, lvl, 1.5);
+            run (e, s);
+            const int start = s.size() - (int) (0.4 * kFs);
+            const int len   = (int) (0.3 * kFs);
+            const float f1 = goertzel (s.l, start, len, 1000.0);
+            const float h2 = goertzel (s.l, start, len, 2000.0);
+            const float h3 = goertzel (s.l, start, len, 3000.0);
+            const float thd = std::sqrt (h2 * h2 + h3 * h3) / std::max (1e-9f, f1) * 100.0f;
+            std::printf ("    %+5.1f dBFS : THD %.3f%%\n", lvl, thd);
+            if (prevThd >= 0.0f)
+                grows = grows && thd >= prevThd - 0.02f; // allow tiny numerical wobble
+            prevThd = thd;
+        }
+        CHECK (grows, "THD rises (or holds) as input level climbs toward 0 dBFS");
+    }
+
+    // ------------------------------------------------- attack/recovery tables --
+    {
+        auto measureAttackMs = [&] (float atkMs) {
+            auto p = base;
+            p.attackMs = atkMs;
+            auto e = makeEngine (p);
+            auto s = sine (1000.0, -6.0f, 1.5);
+            float finalGr;
+            {
+                auto e2 = makeEngine (p);
+                auto s2 = sine (1000.0, -6.0f, 3.0);
+                finalGr = grAfter (e2, s2);
+            }
+            int block = 64, t63 = -1;
+            for (int pos = 0; pos < s.size(); pos += block)
+            {
+                const int n = std::min (block, s.size() - pos);
+                float* chans[2] = { s.l.data() + pos, s.r.data() + pos };
+                e.process (chans, 2, n);
+                if (t63 < 0 && e.getGainReductionDB (0) >= 0.63f * finalGr)
+                {
+                    t63 = pos + n;
+                    break;
+                }
+            }
+            return t63 < 0 ? 1.0e9 : 1000.0 * t63 / kFs;
+        };
+
+        std::printf ("  info : attack-to-63%% GR across the full 25-70 ms range:\n");
+        double prevAtk = 0.0;
+        bool attackMonotonic = true;
+        for (float atk = 25.0f; atk <= 70.0f; atk += 5.0f)
+        {
+            const double t = measureAttackMs (atk);
+            std::printf ("    %4.0f ms setting -> %.1f ms\n", atk, t);
+            if (atk > 25.0f)
+                attackMonotonic = attackMonotonic && t > prevAtk;
+            prevAtk = t;
+        }
+        CHECK (attackMonotonic, "attack-to-63%% GR increases monotonically across all 10 detents");
+
+        auto measureReleaseS = [&] (int idx) {
+            auto p = base;
+            p.recoveryIdx = idx;
+            auto e = makeEngine (p);
+            auto burst = sine (1000.0, -6.0f, 2.0);
+            run (e, burst);
+            const float gr0 = e.getGainReductionDB (0);
+            Stereo quiet ((int) (12.0 * kFs));
+            int block = 256, t37 = -1;
+            for (int pos = 0; pos < quiet.size(); pos += block)
+            {
+                const int n = std::min (block, quiet.size() - pos);
+                float* chans[2] = { quiet.l.data() + pos, quiet.r.data() + pos };
+                e.process (chans, 2, n);
+                if (t37 < 0 && e.getGainReductionDB (0) <= 0.37f * gr0)
+                {
+                    t37 = pos + n;
+                    break;
+                }
+            }
+            return t37 < 0 ? 1.0e9 : (double) t37 / kFs;
+        };
+
+        const char* recoveryNames[5] = { "0.2 s", "0.4 s", "0.6 s", "4 s", "8 s" };
+        std::printf ("  info : recovery-to-37%% across all 5 detents:\n");
+        double prevRec = 0.0;
+        bool recoveryMonotonic = true;
+        for (int idx = 0; idx < 5; ++idx)
+        {
+            const double t = measureReleaseS (idx);
+            std::printf ("    %-5s setting -> %.2f s\n", recoveryNames[idx], t);
+            if (idx > 0)
+                recoveryMonotonic = recoveryMonotonic && t > prevRec;
+            prevRec = t;
+        }
+        CHECK (recoveryMonotonic, "recovery-to-37%% increases monotonically across all 5 detents");
+    }
+
+    // ------------------------------------- ballistics vs. oversampling factor --
+    {
+        // The OVERSAMPLING selector re-prepares the engine at hostRate*factor;
+        // attack times are specified in real-world ms, so they must land in
+        // the same place no matter which factor (1x/2x/4x/8x) is active.
+        auto measureAttackMsAt = [&] (double engineFs) {
+            auto p = base;
+            p.attackMs = 25.0f;
+
+            float finalGr;
+            {
+                mc2::MC2Engine e2;
+                e2.prepare (engineFs, 1024);
+                e2.setParams (p);
+                auto s2 = sine (1000.0, -6.0f, 3.0, engineFs);
+                finalGr = grAfter (e2, s2);
+            }
+
+            mc2::MC2Engine e;
+            e.prepare (engineFs, 1024);
+            e.setParams (p);
+            auto s = sine (1000.0, -6.0f, 1.5, engineFs);
+
+            int block = 64, t63 = -1;
+            for (int pos = 0; pos < s.size(); pos += block)
+            {
+                const int n = std::min (block, s.size() - pos);
+                float* chans[2] = { s.l.data() + pos, s.r.data() + pos };
+                e.process (chans, 2, n);
+                if (t63 < 0 && e.getGainReductionDB (0) >= 0.63f * finalGr)
+                {
+                    t63 = pos + n;
+                    break;
+                }
+            }
+            return t63 < 0 ? 1.0e9 : 1000.0 * t63 / engineFs;
+        };
+
+        const double t1x = measureAttackMsAt (kFs / 2.0); // 1x, no oversampling
+        const double t2x = measureAttackMsAt (kFs);       // 2x, this project's default
+        const double t4x = measureAttackMsAt (kFs * 2.0); // 4x
+        const double t8x = measureAttackMsAt (kFs * 4.0); // 8x
+        std::printf ("  info : 25 ms attack at 1x/2x/4x/8x engine rates -> %.1f / %.1f / %.1f / %.1f ms\n",
+                     t1x, t2x, t4x, t8x);
+        const double maxDrift = std::max ({ std::fabs (t2x - t1x), std::fabs (t4x - t1x),
+                                            std::fabs (t8x - t1x) });
+        CHECK (maxDrift < 5.0, "attack timing stays put across the oversampling selector's 1x-8x rates");
+    }
+
+    // -------------------------------------------- stereo image preservation --
+    {
+        auto p = base;
+        p.stereoLink = true;
+        auto e = makeEngine (p);
+
+        // A programme panned (not hard-left) toward L: R sits 6 dB under L.
+        // A shared control voltage compresses both channels by the same GR,
+        // but the twin-tube stage's saturation is level-dependent by design
+        // (that's the point of a vari-mu circuit) - L and R sit at different
+        // absolute drive levels even with identical GR applied, so a little
+        // sub-dB drift from that nonlinearity is expected, not a stereo-link
+        // defect. A real stereo-link regression (each channel compressing
+        // independently) drifts by several dB, not a fraction of one - see
+        // the "unlinked channels compress independently" check above.
+        auto s = sine (1000.0, -6.0f, 2.5);
+        for (auto& v : s.r) v *= 0.5011872336f; // -6 dB relative to L
+
+        run (e, s);
+        const float outL = 20.0f * std::log10 (peakOfTail (s.l, 0.25) + 1e-12f);
+        const float outR = 20.0f * std::log10 (peakOfTail (s.r, 0.25) + 1e-12f);
+        const float balanceDrift = std::fabs ((outL - outR) - 6.0f);
+        std::printf ("  info : panned programme (L-R input diff 6.0 dB) -> output diff %.2f dB\n",
+                     outL - outR);
+        CHECK (balanceDrift < 0.5f, "linked stereo bus keeps the mix balance within 0.5 dB");
+    }
+
     // ------------------------------------------------------------- mono --
     {
         auto e = makeEngine (base);
@@ -351,6 +557,101 @@ int main()
         float* chans[1] = { s.l.data() };
         e.process (chans, 1, s.size());
         CHECK (e.getGainReductionDB (0) > 1.0f, "mono operation works");
+    }
+
+    // --------------------------------------------------------- LUFS / true peak --
+    {
+        mc2::LoudnessMeter meter;
+        meter.prepare (kFs, 2);
+        Stereo silence ((int) (2.0 * kFs));
+        float* chans[2] = { silence.l.data(), silence.r.data() };
+        meter.process (chans, 2, silence.size());
+        std::printf ("  info : silence -> LUFS-I %.1f, LUFS-S %.1f\n",
+                     meter.getIntegratedLUFS(), meter.getShortTermLUFS());
+        CHECK (meter.getIntegratedLUFS() <= -69.0f, "silence never crosses the LUFS-I absolute gate");
+    }
+
+    {
+        auto lufsIFor = [&] (float peakDB) {
+            mc2::LoudnessMeter meter;
+            meter.prepare (kFs, 1);
+            auto s = sine (1000.0, peakDB, 2.0);
+            float* chans[1] = { s.l.data() };
+            meter.process (chans, 1, s.size());
+            return meter.getIntegratedLUFS();
+        };
+
+        const float lufsHot   = lufsIFor (0.0f);
+        const float lufsQuiet = lufsIFor (-12.0f);
+        std::printf ("  info : LUFS-I @0 dBFS %.2f vs @-12 dBFS %.2f (diff %.2f dB)\n",
+                     lufsHot, lufsQuiet, lufsHot - lufsQuiet);
+        CHECK (std::fabs ((lufsHot - lufsQuiet) - 12.0f) < 0.5f,
+               "LUFS-I tracks input level 1:1 (K-weighting doesn't change with level)");
+    }
+
+    {
+        mc2::LoudnessMeter meterCombined;
+        meterCombined.prepare (kFs, 1);
+        auto loud = sine (1000.0, 0.0f, 3.0);
+        {
+            float* chans[1] = { loud.l.data() };
+            meterCombined.process (chans, 1, loud.size());
+        }
+        Stereo quiet ((int) (3.0 * kFs));
+        {
+            float* chans[1] = { quiet.l.data() };
+            meterCombined.process (chans, 1, quiet.size());
+        }
+        const float lufsCombined = meterCombined.getIntegratedLUFS();
+
+        mc2::LoudnessMeter meterLoudAlone;
+        meterLoudAlone.prepare (kFs, 1);
+        auto loudAlone = sine (1000.0, 0.0f, 3.0);
+        float* chansAlone[1] = { loudAlone.l.data() };
+        meterLoudAlone.process (chansAlone, 1, loudAlone.size());
+        const float lufsLoudAlone = meterLoudAlone.getIntegratedLUFS();
+
+        std::printf ("  info : LUFS-I loud+quiet %.2f vs loud-alone %.2f (gate should reject the quiet half)\n",
+                     lufsCombined, lufsLoudAlone);
+        CHECK (std::fabs (lufsCombined - lufsLoudAlone) < 0.5f,
+               "relative gate excludes a quiet half instead of averaging it in");
+    }
+
+    {
+        auto s = sine (997.0, 0.0f, 0.5);
+        float samplePeak = 0.0f;
+        for (float v : s.l) samplePeak = std::max (samplePeak, std::fabs (v));
+        const float samplePeakDB = 20.0f * std::log10 (samplePeak);
+
+        mc2::LoudnessMeter meter;
+        meter.prepare (kFs, 1);
+        float* chans[1] = { s.l.data() };
+        meter.process (chans, 1, s.size());
+
+        std::printf ("  info : 0 dBFS 997 Hz tone -> sample peak %.3f dB, true peak %.3f dBTP\n",
+                     samplePeakDB, meter.getTruePeakDB());
+        CHECK (meter.getTruePeakDB() >= samplePeakDB - 0.01f,
+               "true-peak estimate is never below the plain sample peak");
+    }
+
+    {
+        // A two-sample 0 dBFS pulse bracketed by silence: Catmull-Rom
+        // interpolation between the two full-scale samples (0,1,1,0 as the
+        // four control points) overshoots to 1.125 at the midpoint - a real
+        // inter-sample over a plain sample-peak reading (0.0 dB) would miss.
+        std::vector<float> pulse (20, 0.0f);
+        pulse[10] = 1.0f;
+        pulse[11] = 1.0f;
+
+        mc2::LoudnessMeter meter;
+        meter.prepare (kFs, 1);
+        float* chans[1] = { pulse.data() };
+        meter.process (chans, 1, (int) pulse.size());
+
+        std::printf ("  info : two-sample 0 dBFS pulse -> true peak %.2f dBTP (sample peak is exactly 0.0)\n",
+                     meter.getTruePeakDB());
+        CHECK (meter.getTruePeakDB() > 0.5f,
+               "true-peak estimator catches an inter-sample over a plain sample peak would miss");
     }
 
     std::printf (failures == 0 ? "\nALL CHECKS PASSED\n"

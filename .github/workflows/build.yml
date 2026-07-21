@@ -1,0 +1,198 @@
+name: Build
+
+# Reusable workflow: configures, builds and tests MC-2 on all three target
+# platforms, then uploads the plugin bundles as workflow artifacts. Called by
+# both ci.yml (every push/PR) and release.yml (version tags).
+on:
+  workflow_call:
+
+env:
+  BUILD_TYPE: Release
+
+jobs:
+  linux:
+    name: Linux (VST3, Standalone)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install JUCE Linux dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libasound2-dev libx11-dev libxext-dev libxinerama-dev \
+            libxrandr-dev libxcursor-dev libfreetype-dev libfontconfig1-dev \
+            xvfb unzip
+
+      - name: Cache build tree (JUCE fetch + object files)
+        uses: actions/cache@v4
+        with:
+          path: build
+          key: linux-build-${{ hashFiles('CMakeLists.txt', 'cmake/**', 'Source/**', 'tests/**', '.github/workflows/build.yml') }}
+          restore-keys: |
+            linux-build-
+
+      - name: Configure
+        run: cmake -B build -DCMAKE_BUILD_TYPE=${{ env.BUILD_TYPE }}
+
+      - name: Build
+        run: cmake --build build --config ${{ env.BUILD_TYPE }} --parallel
+
+      - name: Run DSP test suite
+        run: ctest --test-dir build --output-on-failure
+
+      - name: Download pluginval
+        run: |
+          curl -fsSL -o pluginval.zip \
+            https://github.com/Tracktion/pluginval/releases/latest/download/pluginval_Linux.zip
+          unzip -q pluginval.zip -d pluginval
+          chmod +x pluginval/pluginval
+
+      - name: Validate VST3 host automation (pluginval)
+        run: |
+          xvfb-run -a ./pluginval/pluginval --strictness-level 5 --timeout-ms 120000 \
+            --validate "build/MC2_artefacts/${{ env.BUILD_TYPE }}/VST3/MC-2 Mastering Compressor.vst3"
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: MC2-Linux
+          path: build/MC2_artefacts/${{ env.BUILD_TYPE }}
+          if-no-files-found: error
+
+  macos:
+    name: macOS (VST3, AU, Standalone)
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Cache build tree (JUCE fetch + object files)
+        uses: actions/cache@v4
+        with:
+          path: build
+          key: macos-build-${{ hashFiles('CMakeLists.txt', 'cmake/**', 'Source/**', 'tests/**', '.github/workflows/build.yml') }}
+          restore-keys: |
+            macos-build-
+
+      - name: Configure (universal binary)
+        run: |
+          cmake -B build -DCMAKE_BUILD_TYPE=${{ env.BUILD_TYPE }} \
+                -DCMAKE_OSX_ARCHITECTURES="arm64;x86_64"
+
+      - name: Build
+        run: cmake --build build --config ${{ env.BUILD_TYPE }} --parallel
+
+      - name: Run DSP test suite
+        run: ctest --test-dir build --output-on-failure
+
+      - name: Download pluginval
+        run: |
+          curl -fsSL -o pluginval.zip \
+            https://github.com/Tracktion/pluginval/releases/latest/download/pluginval_macOS.zip
+          unzip -q pluginval.zip -d pluginval
+
+      - name: Install AU into the system Components folder
+        # AU discovery goes through macOS's AudioComponent registry, which is
+        # a filesystem scan of ~/Library/Audio/Plug-Ins/Components (and the
+        # system-wide folder) - pluginval can't "see" a .component sitting in
+        # the build directory, unlike VST3 which it can load directly.
+        run: |
+          mkdir -p ~/Library/Audio/Plug-Ins/Components
+          cp -R "build/MC2_artefacts/${{ env.BUILD_TYPE }}/AU/MC-2 Mastering Compressor.component" \
+            ~/Library/Audio/Plug-Ins/Components/
+          killall -9 AudioComponentRegistrar 2>/dev/null || true
+
+      - name: Validate VST3 + AU host automation (pluginval)
+        run: |
+          PLUGINVAL="./pluginval/pluginval.app/Contents/MacOS/pluginval"
+          "$PLUGINVAL" --strictness-level 5 --timeout-ms 120000 \
+            --validate "build/MC2_artefacts/${{ env.BUILD_TYPE }}/VST3/MC-2 Mastering Compressor.vst3"
+          "$PLUGINVAL" --strictness-level 5 --timeout-ms 120000 \
+            --validate ~/"Library/Audio/Plug-Ins/Components/MC-2 Mastering Compressor.component"
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: MC2-macOS
+          path: build/MC2_artefacts/${{ env.BUILD_TYPE }}
+          if-no-files-found: error
+
+  windows:
+    name: Windows (VST3, Standalone)
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Cache build tree (JUCE fetch + object files)
+        uses: actions/cache@v4
+        with:
+          path: build
+          key: windows-build-${{ hashFiles('CMakeLists.txt', 'cmake/**', 'Source/**', 'tests/**', '.github/workflows/build.yml') }}
+          restore-keys: |
+            windows-build-
+
+      - name: Configure
+        # -A x64: CMake's Visual Studio generator defaults to Win32 without
+        # it. The installer targets the 64-bit Common Files\VST3 folder, so
+        # a Win32 build here would silently land in the wrong place.
+        run: cmake -B build -A x64 -DCMAKE_BUILD_TYPE=${{ env.BUILD_TYPE }}
+
+      - name: Build
+        run: cmake --build build --config ${{ env.BUILD_TYPE }} --parallel
+
+      - name: Run DSP test suite
+        run: ctest --test-dir build -C ${{ env.BUILD_TYPE }} --output-on-failure
+
+      - name: Download pluginval
+        shell: pwsh
+        run: |
+          Invoke-WebRequest -Uri "https://github.com/Tracktion/pluginval/releases/latest/download/pluginval_Windows.zip" -OutFile pluginval.zip
+          Expand-Archive -Path pluginval.zip -DestinationPath pluginval
+
+      - name: Validate VST3 host automation (pluginval)
+        shell: pwsh
+        run: |
+          & ".\pluginval\pluginval.exe" --strictness-level 5 --timeout-ms 120000 `
+            --validate "build\MC2_artefacts\${{ env.BUILD_TYPE }}\VST3\MC-2 Mastering Compressor.vst3"
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: MC2-Windows
+          path: build/MC2_artefacts/${{ env.BUILD_TYPE }}
+          if-no-files-found: error
+
+      - name: Ensure Inno Setup is available
+        shell: pwsh
+        run: |
+          # Search rather than hardcode a version-specific path (GitHub's
+          # runner images preinstall Inno Setup, but the exact major version
+          # in "Program Files (x86)\Inno Setup N" can change over time).
+          $iscc = Get-ChildItem "C:\Program Files (x86)\Inno Setup*\ISCC.exe" -ErrorAction SilentlyContinue |
+                    Select-Object -First 1
+          if (-not $iscc) {
+            choco install innosetup -y --no-progress
+            $iscc = Get-ChildItem "C:\Program Files (x86)\Inno Setup*\ISCC.exe" -ErrorAction SilentlyContinue |
+                      Select-Object -First 1
+          }
+          if (-not $iscc) {
+            Write-Error "ISCC.exe not found, even after installing Inno Setup via chocolatey"
+            exit 1
+          }
+          Write-Host "Using $($iscc.FullName)"
+          echo "ISCC_PATH=$($iscc.FullName)" >> $env:GITHUB_ENV
+
+      - name: Build Windows installer (Inno Setup)
+        shell: pwsh
+        run: |
+          $version = (Select-String -Path CMakeLists.txt -Pattern 'VERSION\s+([0-9]+\.[0-9]+\.[0-9]+)').Matches[0].Groups[1].Value
+          Write-Host "Installer version: $version"
+          New-Item -ItemType Directory -Force -Path dist | Out-Null
+          & "$env:ISCC_PATH" "/DMyAppVersion=$version" "installer\windows\MC2.iss"
+
+      - name: Upload Windows installer
+        uses: actions/upload-artifact@v4
+        with:
+          name: MC2-Windows-Installer
+          path: dist\*.exe
+          if-no-files-found: error

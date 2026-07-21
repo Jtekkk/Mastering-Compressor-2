@@ -22,6 +22,18 @@ public:
         setInterceptsMouseClicks (false, false);
     }
 
+    // The engine's two channels carry Mid/Side instead of Left/Right when
+    // that mode is on - called from the editor so the legend never lies
+    // about which signal the needle is actually showing.
+    void setLabel (juce::String newLabel)
+    {
+        if (newLabel != side)
+        {
+            side = std::move (newLabel);
+            repaint();
+        }
+    }
+
     // Called from the editor's UI timer (~30 Hz).
     void setTarget (float vu, Mode m)
     {
@@ -31,8 +43,19 @@ public:
             repaint();
         }
         targetVU = juce::jlimit (-30.0f, 5.0f, vu);
-        // VU ballistics: ~300 ms to 99% => tau ~65 ms, evaluated per frame.
-        needleVU += 0.40f * (targetVU - needleVU);
+
+        // A real moving-coil meter is a lightly underdamped spring-mass
+        // system, not a plain low-pass: the needle overshoots the target a
+        // touch before it settles rather than gliding straight up to it.
+        // Explicit-Euler at the ~30 Hz timer rate with these coefficients
+        // is a damped oscillation (eigenvalues of the discrete update have
+        // magnitude ~0.76 - checked, not just assumed, so it can't run away).
+        constexpr float dt   = 1.0f / 30.0f;
+        constexpr float wn   = 20.0f;   // natural frequency, rad/s
+        constexpr float zeta = 0.65f;   // damping ratio (<1 => underdamped)
+        const float accel = wn * wn * (targetVU - needleVU) - 2.0f * zeta * wn * needleVel;
+        needleVel += dt * accel;
+        needleVU  += dt * needleVel;
         repaint();
     }
 
@@ -183,7 +206,7 @@ private:
 
     juce::String side;
     Mode mode = Mode::GainReduction;
-    float needleVU = -23.0f, targetVU = -23.0f;
+    float needleVU = -23.0f, targetVU = -23.0f, needleVel = 0.0f;
 };
 
 // ---------------------------------------------------------------------------

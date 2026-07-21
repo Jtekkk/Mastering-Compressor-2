@@ -3,7 +3,9 @@
 #include <juce_audio_processors/juce_audio_processors.h>
 #include <juce_gui_basics/juce_gui_basics.h>
 
+#include "GUI/GrHistoryGraph.h"
 #include "GUI/MC2LookAndFeel.h"
+#include "GUI/SpectrumAnalyzer.h"
 #include "GUI/VUMeter.h"
 #include "PluginProcessor.h"
 
@@ -18,8 +20,9 @@ public:
     void resized() override;
 
 private:
-    using SliderAttachment = juce::AudioProcessorValueTreeState::SliderAttachment;
-    using ButtonAttachment = juce::AudioProcessorValueTreeState::ButtonAttachment;
+    using SliderAttachment   = juce::AudioProcessorValueTreeState::SliderAttachment;
+    using ButtonAttachment   = juce::AudioProcessorValueTreeState::ButtonAttachment;
+    using ComboBoxAttachment = juce::AudioProcessorValueTreeState::ComboBoxAttachment;
 
     void timerCallback() override;
 
@@ -36,11 +39,24 @@ private:
 
     VUMeter meterL { "LEFT" }, meterR { "RIGHT" };
     TubeWindow tubeWindow;
+    GrHistoryGraph grHistory;
+    SpectrumAnalyzer spectrum;
 
     juce::Slider inputKnob, thresholdKnob, attackKnob, outputKnob;
     juce::Slider recoverySwitch, rectifierSwitch, scEqSwitch;
     juce::Slider eqLowKnob, eqAirKnob, calLKnob, calRKnob;
     juce::ToggleButton modeToggle, linkToggle, eqInToggle, meterToggle, bypassToggle;
+
+    juce::ComboBox presetBox;
+    juce::TextButton undoButton { "UNDO" }, redoButton { "REDO" };
+    int undoTransactionCountdown = 0;
+
+    juce::Label lufsILabel, lufsSLabel, truePeakLabel;
+
+    juce::ComboBox oversamplingBox;
+    std::unique_ptr<ComboBoxAttachment> oversamplingAttachment;
+
+    juce::TextButton msToggle;
 
     std::vector<std::unique_ptr<SliderAttachment>> sliderAttachments;
     std::vector<std::unique_ptr<ButtonAttachment>> buttonAttachments;

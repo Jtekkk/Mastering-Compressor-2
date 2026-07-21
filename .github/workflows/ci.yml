@@ -1,0 +1,19 @@
+name: CI
+
+# Every push and pull request builds and DSP-tests MC-2 on Linux, macOS and
+# Windows, so a broken build or a regression in the DSP suite is caught
+# before it lands.
+on:
+  push:
+    branches: [claude/gifted-goldberg-czpgfe, main]
+  pull_request:
+    branches: [claude/gifted-goldberg-czpgfe, main]
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    uses: ./.github/workflows/build.yml
