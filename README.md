@@ -147,6 +147,14 @@ parameter changes are all exercised against the real binary, not just the
 DSP core. A red check means the build, the DSP suite, or host automation
 broke on that platform.
 
+The Windows job also builds a proper installer: [`installer/windows/MC2.iss`](installer/windows/MC2.iss)
+(Inno Setup, preinstalled on GitHub's Windows runners) packages the VST3
+into `Common Files\VST3` and the Standalone app into `Program Files`, with
+component selection (VST3-only / Standalone-only / both) and Start
+Menu/desktop shortcuts. It's uploaded as the `MC2-Windows-Installer`
+artifact on every run - open any CI run's summary page and grab it from
+Artifacts, no tag required.
+
 To cut a release:
 
 1. Bump `project(... VERSION x.y.z ...)` in `CMakeLists.txt`.
@@ -154,7 +162,8 @@ To cut a release:
 
 [`release.yml`](.github/workflows/release.yml) verifies the tag matches the
 CMakeLists version, runs the same three-platform build, then packages and
-attaches a `.zip` per platform to a new GitHub Release.
+attaches a `.zip` per platform plus the Windows `.exe` installer to a new
+GitHub Release.
 
 ## Beyond the hardware
 

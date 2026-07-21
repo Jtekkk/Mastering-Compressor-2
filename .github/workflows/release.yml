@@ -55,16 +55,25 @@ jobs:
           name: MC2-Windows
           path: artifacts/Windows
 
+      - name: Download Windows installer
+        uses: actions/download-artifact@v4
+        with:
+          name: MC2-Windows-Installer
+          path: artifacts/WindowsInstaller
+
       - name: Package release archives
         run: |
           mkdir -p dist
           ( cd artifacts/Linux   && zip -r "${GITHUB_WORKSPACE}/dist/MC2-${GITHUB_REF_NAME}-Linux.zip"   . )
           ( cd artifacts/macOS   && zip -r -y "${GITHUB_WORKSPACE}/dist/MC2-${GITHUB_REF_NAME}-macOS.zip" . )
           ( cd artifacts/Windows && zip -r "${GITHUB_WORKSPACE}/dist/MC2-${GITHUB_REF_NAME}-Windows.zip" . )
+          cp artifacts/WindowsInstaller/*.exe dist/
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
           name: MC-2 ${{ github.ref_name }}
           generate_release_notes: true
-          files: dist/*.zip
+          files: |
+            dist/*.zip
+            dist/*.exe
