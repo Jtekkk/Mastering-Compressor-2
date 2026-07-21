@@ -124,7 +124,7 @@ passive EQ and tube harmonics, plus:
 * **attack/recovery tables** across all 10 attack and 5 recovery detents,
   each asserted to be monotonically slower than the last; and
 * a **stereo image preservation** check — a programme panned 6 dB L-over-R
-  keeps that balance within 0.3 dB after linked-stereo compression.
+  keeps that balance within 0.5 dB after linked-stereo compression.
 
 ```bash
 cmake --build build --target dsp_smoke && ./build/dsp_smoke
